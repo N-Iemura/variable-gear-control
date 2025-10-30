@@ -27,7 +27,7 @@
 | ODrive S1 | 2 | 2軸BLDCドライバ、USBまたはCAN接続 |
 | BLDCモータ（Motor0） | 1 | 主トルク源、高トルク型、エンコーダ付き |
 | BLDCモータ（Motor1） | 1 | 補助モータ（スピード用）、エンコーダ付き |
-| 絶対値エンコーダ | 2 | 8192 CPR |
+| 絶対値エンコーダ | 2 | 16384 CPR |
 
 ---
 
@@ -62,7 +62,7 @@ axis.motor.config.torque_constant          = <Kt [N·m/A]>
 axis.motor.config.current_lim              = 30.0
 axis.motor.config.requested_current_range  = 40.0
 
-axis.encoder.config.cpr                    = 8192
+axis.encoder.config.cpr                    = 16384
 axis.encoder.config.mode                   = ENCODER_MODE_INCREMENTAL
 axis.encoder.config.use_index              = True
 axis.encoder.config.bandwidth              = 1000.0

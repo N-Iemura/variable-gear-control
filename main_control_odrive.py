@@ -58,6 +58,194 @@ class ReferenceGenerator:
             return self._nstep(profile_cfg, elapsed)
         raise KeyError(f"Unsupported profile: {self.profile}")
 
+    def get_active_profile_name(self) -> str:
+        return self.profile
+
+    def get_profile_label(self) -> str:
+        label = self.config.get("file_label")
+        if label is None:
+            return self.profile
+        return str(label)
+
+    @staticmethod
+    def sanitize_label_for_filename(label: str) -> str:
+        if not label:
+            return "profile"
+        safe = "".join(ch if (ch.isalnum() or ch in ("-", "_")) else "_" for ch in str(label))
+        return safe or "profile"
+
+    @staticmethod
+    def _normalize_filename_values(values) -> Optional[np.ndarray]:
+        if values is None:
+            return None
+        arr = np.asarray(values, dtype=float).ravel()
+        return arr if arr.size > 0 else None
+
+    def _infer_profile_filename_values(self, profile: str, cfg: Dict[str, object]) -> Optional[np.ndarray]:
+        if profile == "step":
+            offset = float(cfg.get("offset", 0.0))
+            amp = float(cfg.get("output_amplitude", 0.0))
+            if abs(amp) < 1e-12:
+                return self._normalize_filename_values([offset])
+            return self._normalize_filename_values([offset, offset + amp])
+        if profile in ("sine", "chirp"):
+            offset = float(cfg.get("offset", 0.0))
+            amp = float(cfg.get("output_amplitude", 0.0))
+            if abs(amp) < 1e-12:
+                return self._normalize_filename_values([offset])
+            return self._normalize_filename_values([offset - amp, offset + amp])
+        if profile in ("ramp", "ramp_b"):
+            start_value = float(cfg.get("start_value", 0.0))
+            end_value = float(cfg.get("end_value", start_value))
+            return self._normalize_filename_values([start_value, end_value])
+        if profile == "ramp_step":
+            start_value = float(cfg.get("start_value", 0.0))
+            end_value = float(cfg.get("end_value", start_value))
+            step_cfg = cfg.get("step", {}) if isinstance(cfg.get("step"), dict) else {}
+            amplitude = float(step_cfg.get("amplitude", 0.0))
+            candidates = [start_value, end_value]
+            if abs(amplitude) >= 1e-12:
+                candidates.append(end_value + amplitude)
+                if not bool(step_cfg.get("align_to_ramp_end", True)):
+                    candidates.append(start_value + amplitude)
+            return self._normalize_filename_values(candidates)
+        if profile == "nstep":
+            values = list(cfg.get("values", []))
+            wait_value = cfg.get("wait_value")
+            if wait_value is not None:
+                values = [wait_value] + values
+            return self._normalize_filename_values(values)
+        return None
+
+    def resolve_command_values(
+        self,
+        base_command,
+        theta_ref: Optional[object] = None,
+        override: Optional[object] = None,
+        decimals: int = 4,
+    ) -> np.ndarray:
+        profile = self.get_active_profile_name()
+        cfg = self.profiles.get(profile, {})
+        explicit = self._normalize_filename_values(cfg.get("filename_values"))
+        if explicit is not None:
+            values = explicit
+        else:
+            global_override = self._normalize_filename_values(override)
+            if global_override is not None:
+                values = global_override
+            else:
+                base_arr = np.asarray(base_command, dtype=float).ravel()
+                if base_arr.size == 0:
+                    base_arr = np.array([0.0], dtype=float)
+                values = np.unique(np.round(base_arr, decimals=decimals))
+                if theta_ref is not None:
+                    theta_arr = np.asarray(theta_ref, dtype=float).ravel()
+                else:
+                    theta_arr = base_arr
+                if values.size > 20 and theta_arr.size > 0:
+                    values = np.unique(
+                        np.round(
+                            [np.min(theta_arr), np.max(theta_arr)],
+                            decimals=decimals,
+                        )
+                    )
+        return np.round(values, decimals=decimals)
+
+    @staticmethod
+    def format_command_value(value: float, decimals: int = 4) -> str:
+        txt = f"{float(value):.{decimals}f}".rstrip("0").rstrip(".")
+        return txt if txt else "0"
+
+    def format_profile_settings(self, profile: str) -> str:
+        cfg = self.profiles.get(profile, {})
+
+        def fmt(value):
+            if isinstance(value, float):
+                return f"{value:g}"
+            if isinstance(value, (list, tuple, np.ndarray)):
+                arr = np.asarray(value, dtype=float).ravel()
+                return "[" + ", ".join(f"{v:g}" for v in arr) + "]"
+            return str(value)
+
+        if profile == "step":
+            return ", ".join(
+                [
+                    f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
+                    f"step={fmt(cfg.get('step_duration', 0.0))}s",
+                    f"amp={fmt(cfg.get('output_amplitude', 0.0))}turn",
+                    f"offset={fmt(cfg.get('offset', 0.0))}",
+                ]
+            )
+        if profile == "sine":
+            return ", ".join(
+                [
+                    f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
+                    f"amp={fmt(cfg.get('output_amplitude', 0.0))}turn",
+                    f"freq={fmt(cfg.get('frequency_hz', 0.0))}Hz",
+                    f"offset={fmt(cfg.get('offset', 0.0))}",
+                ]
+            )
+        if profile == "chirp":
+            return ", ".join(
+                [
+                    f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
+                    f"amp={fmt(cfg.get('output_amplitude', 0.0))}turn",
+                    f"f0={fmt(cfg.get('start_frequency_hz', 0.0))}Hz",
+                    f"f1={fmt(cfg.get('end_frequency_hz', 0.0))}Hz",
+                    f"dur={fmt(cfg.get('duration', 0.0))}s",
+                    f"offset={fmt(cfg.get('offset', 0.0))}",
+                ]
+            )
+        if profile == "ramp":
+            return ", ".join(
+                [
+                    f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
+                    f"start={fmt(cfg.get('start_value', 0.0))}",
+                    f"end={fmt(cfg.get('end_value', 0.0))}",
+                    f"ramp={fmt(cfg.get('ramp_duration', 0.0))}s",
+                    f"hold={fmt(cfg.get('hold_duration', 0.0))}s",
+                    f"return={fmt(cfg.get('return_duration', 0.0))}s",
+                ]
+            )
+        if profile == "ramp_b":
+            return ", ".join(
+                [
+                    f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
+                    f"start={fmt(cfg.get('start_value', 0.0))}",
+                    f"end={fmt(cfg.get('end_value', 0.0))}",
+                    f"ramp={fmt(cfg.get('ramp_duration', 0.0))}s",
+                    f"hold={fmt(cfg.get('hold_duration', 0.0))}s",
+                    f"return={fmt(cfg.get('return_duration', 0.0))}s",
+                    f"start_hold={fmt(cfg.get('start_hold_duration', 0.0))}s",
+                ]
+            )
+        if profile == "ramp_step":
+            step_cfg = cfg.get("step", {}) if isinstance(cfg.get("step"), dict) else {}
+            settings = [
+                f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
+                f"start={fmt(cfg.get('start_value', 0.0))}",
+                f"end={fmt(cfg.get('end_value', 0.0))}",
+                f"ramp={fmt(cfg.get('ramp_duration', 0.0))}s",
+                f"hold={fmt(cfg.get('hold_duration', 0.0))}s",
+                f"return={fmt(cfg.get('return_duration', 0.0))}s",
+                f"step_amp={fmt(step_cfg.get('amplitude', 0.0))}",
+                f"step_dur={fmt(step_cfg.get('duration', 0.0))}s",
+            ]
+            if step_cfg:
+                settings.append(f"step_period={fmt(step_cfg.get('period', 0.0))}s")
+                settings.append(f"step_repeat={step_cfg.get('repeat', True)}")
+            return ", ".join(settings)
+        if profile == "nstep":
+            return ", ".join(
+                [
+                    f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
+                    f"values={fmt(cfg.get('values', []))}",
+                    f"hold={fmt(cfg.get('hold_duration', 0.0))}s",
+                    f"repeat={cfg.get('repeat', True)}",
+                ]
+            )
+        return ""
+
     def _step(self, cfg: Dict[str, object], t: float) -> PositionCommand:
         wait = float(cfg.get("initial_wait", 0.0))
         amp = float(cfg.get("output_amplitude", 0.0))
@@ -255,8 +443,13 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         assist_manager = None
 
     hardware = hardware_cfg
-    logger = DataLogger(logger_cfg, base_path=config_dir.parent)
     reference = ReferenceGenerator(reference_cfg)
+    logger = DataLogger(
+        logger_cfg,
+        base_path=config_dir.parent,
+        controller_config=controller_cfg,
+        reference=reference,
+    )
 
     odrive_iface = ODriveInterface(hardware)
 
@@ -347,8 +540,8 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     finally:
         odrive_iface.shutdown()
         metadata = {
-            "duration": f"{time.time() - start_time:.3f}",
-            "sample_time": f"{dt}",
+            "DurationSec": f"{time.time() - start_time:.3f}",
+            "SampleTime": f"{dt}",
         }
         save_result = logger.save(metadata=metadata)
         csv_path = save_result.get("csv")
