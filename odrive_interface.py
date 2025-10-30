@@ -127,6 +127,7 @@ class ODriveInterface:
 
         self.devices: Dict[str, ODriveAxisHandle] = {}
         self.output_axis: Optional[ODriveAxisHandle] = None
+        self.position_offsets: Dict[str, float] = {}
 
     def connect(self, calibrate: bool = False) -> None:
         _LOGGER.info("Connecting to ODrive devices...")
@@ -142,6 +143,7 @@ class ODriveInterface:
             axis.prepare_for_torque_control()
             if axis.is_motor:
                 _LOGGER.info("Closed-loop torque control ready on %s", name)
+        self.zero_positions()
 
     def _connect_axis(
         self,
@@ -175,12 +177,34 @@ class ODriveInterface:
 
         return handle
 
-    def read_states(self) -> Dict[str, AxisSignals]:
-        states = {
-            name: handle.read_signals() for name, handle in self.devices.items()
-        }
+    def zero_positions(self) -> None:
+        """Snapshot current positions so subsequent reads are zero-referenced."""
+        for name, handle in self.devices.items():
+            signals = handle.read_signals()
+            self.position_offsets[name] = signals.position
         if self.output_axis is not None:
-            states["output"] = self.output_axis.read_signals()
+            signals = self.output_axis.read_signals()
+            self.position_offsets["output"] = signals.position
+        _LOGGER.info("Position offsets captured: %s", ", ".join(f"{k}={v:.6f}" for k, v in self.position_offsets.items()))
+
+    def read_states(self) -> Dict[str, AxisSignals]:
+        states: Dict[str, AxisSignals] = {}
+        for name, handle in self.devices.items():
+            signals = handle.read_signals()
+            offset = self.position_offsets.get(name, 0.0)
+            states[name] = AxisSignals(
+                position=signals.position - offset,
+                velocity=signals.velocity,
+                torque=signals.torque,
+            )
+        if self.output_axis is not None:
+            signals = self.output_axis.read_signals()
+            offset = self.position_offsets.get("output", 0.0)
+            states["output"] = AxisSignals(
+                position=signals.position - offset,
+                velocity=signals.velocity,
+                torque=signals.torque,
+            )
         return states
 
     def command_torques(self, tau_motor0: float, tau_motor1: float) -> None:

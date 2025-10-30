@@ -32,7 +32,7 @@
 ---
 
 ### 2.2 推奨電源設定
-- **バス電圧（Vbus）：** 24〜48V  
+- **バス電圧（Vbus）：** 48V  
 - **ODrive設定例：**
   - `axis.motor.config.current_lim = 30 A`
   - `axis.motor.config.requested_current_range = 40 A`

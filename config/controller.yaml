@@ -74,3 +74,13 @@ sign_enforcement:
 
 dob:
   cutoff_hz: 20.0
+
+identification:
+  initial_wait: 1.0        # [s] idle before ramp starts
+  target_torque: 3.0       # [Nm] desired output torque amplitude
+  ramp_duration: 2.0       # [s] 0 -> target ramp time
+  hold_duration: 1.0       # [s] hold at target torque
+  return_duration: 2.0     # [s] target -> 0 ramp back time
+  rest_duration: 1.0       # [s] stay at 0 torque after cycle
+  repeat: false            # true to loop the pattern
+  motor_freeze: motor1     # motor to keep at 0 torque during experiment

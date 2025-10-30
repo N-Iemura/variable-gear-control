@@ -479,6 +479,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     dt: float = modules["dt"]
 
     odrive_iface.connect(calibrate=False)
+    odrive_iface.zero_positions()
     _LOGGER.info("Control loop started (dt=%.6f s)", dt)
 
     start_time = time.time()
