@@ -1,121 +1,125 @@
-# ODrive-based Variable Gear Assist Control System — Specification
-**Version:** 1.0 (Draft)
+# ODrive対応 可変減速機構 トルク制御システム 仕様書
+**Ver. 1.0 / Draft**
 
 ---
 
-## 1. System Overview
-This repository implements a dual-motor differential mechanism with a variable gear ratio using **ODrive** motor drivers. The control stack provides **position tracking**, **torque control**, **Disturbance Observer (DOB)** compensation, and **Assist-as-Needed (A/N)** logic that engages the second motor only when the primary motor load ratio exceeds a threshold.
+## 1. システム概要
+本システムは、2つのブラシレスモータ（Motor0, Motor1）を差動的に組み合わせて出力軸の減速比を可変とする  
+「可変減速機構（Variable Gear Ratio Mechanism）」を対象とした制御系である。  
+低出力の主モータ（Motor0）を基幹トルク源、補助モータ（Motor1）を高速度域でのアシスト源として用い、  
+負担率に基づくAssist-as-Needed（A/N）制御を実現する。
 
-**Signal flow**
+**信号の流れ**
 ```
-θ_out_ref → [Position PID + FF] → τ_out_cmd
-          → [DOB]               → τ_out_aug
-          → [A/N + Torque Split]→ [τ0, τ1]
-          → ODrive (Torque Mode)→ Plant
+θ_out_ref → [位置制御(PID + FF)] → τ_out_cmd
+          → [外乱オブザーバ(DOB)] → τ_out_aug
+          → [A/N制御 + トルク配分] → [τ0, τ1]
+          → ODrive（トルク制御モード）→ 機構出力
 ```
 
 ---
 
-## 2. Hardware Configuration
+## 2. ハードウェア構成
 
-### 2.1 Bill of Materials (example)
-| Item | Qty | Notes |
-|---|---:|---|
-| ODrive S1 | 2 | Dual-axis BLDC driver, USB/CAN |
-| BLDC Motor (Motor0) | 1 | Main torque source (higher torque), with encoder |
-| BLDC Motor (Motor1) | 1 | Assist motor (speed/assist), with encoder |
-| Incremental Encoder(s) | 2 | ≥ 8192 CPR (or equivalent), differential recommended |
-| Power Supply | 1 | e.g., 24–48 V DC, sized per peak current |
-| E-stop / Power Switch | 1 | Latching emergency stop with main relay |
-| Main Fuse | 1 | Sized for PSU; fast-acting recommended |
-| Per-axis Fuse / PTC | 2 | Optional, protects each motor branch |
-| Wiring / Connectors | — | Shielded motor phases, twisted pairs for encoders |
-| Chassis / Ground | — | Single-point star ground to PSU return |
+### 2.1 使用機器例
+| 機器 | 数量 | 備考 |
+|------|------:|------|
+| ODrive（v3.x / v4.x） | 1 | 2軸BLDCドライバ、USBまたはCAN接続 |
+| BLDCモータ（Motor0） | 1 | 主トルク源、高トルク型、エンコーダ付き |
+| BLDCモータ（Motor1） | 1 | 補助モータ（スピード用）、エンコーダ付き |
+| インクリメンタルエンコーダ | 2 | 8192 CPR以上推奨、差動出力型 |
+| 電源 | 1 | DC 24〜48V、必要電流容量に応じて選定 |
+| 非常停止スイッチ（E-Stop） | 1 | 主電源リレー制御用 |
+| メインヒューズ | 1 | 電源ライン保護用 |
+| モータ用ヒューズ/PTC | 2 | 各モータ軸保護用（推奨） |
+| シールドケーブル | 適量 | モータ・エンコーダ用、ツイストペア構成 |
+| アース線 | 1式 | スタ―接地構成を推奨 |
 
-> Replace parts with your actual hardware; values below are safe defaults to start commissioning.
+---
 
-### 2.2 Power & Limits (typical starting points)
-- **Bus voltage (Vbus):** 24–48 V (set by your PSU).  
-- **ODrive current limits (per axis):**  
-  - `axis.motor.config.current_lim`: 20–40 A (match motor/driver capability)  
-  - `axis.controller.config.vel_limit`: motor-safe speed limit  
-  - `odrv.config.dc_max_negative_current`: 0 (disable regen into PSU unless you have a dump resistor)  
-- **Thermal & wiring:** Use appropriate gauge, keep motor phase leads short; ensure airflow for ODrive.
+### 2.2 推奨電源設定
+- **バス電圧（Vbus）：** 24〜48V  
+- **ODrive設定例：**
+  - `axis.motor.config.current_lim = 30 A`
+  - `axis.motor.config.requested_current_range = 40 A`
+  - `axis.controller.config.vel_limit = <モータ許容速度>`
+  - `odrv.config.dc_max_negative_current = 0`（回生無効）  
 
-### 2.3 Encoder & Motor Wiring (textual)
-- **Motors:** U/V/W → ODrive M0/M1 phases. Keep cable lengths short and routed away from encoders.  
-- **Encoders:** A+/A−, B+/B−, Z+/Z− → ODrive encoder inputs; use **twisted, shielded pairs**. Shield bonded at **one end** only (controller side).  
-- **Grounding:** Single-point ground at PSU negative; avoid ground loops.  
-- **E-stop:** Hard-cuts PSU via relay; optional soft-stop signals to host PC/ODrive for graceful decel.  
-- **EMI:** Separate power and signal harnesses; add ferrites if necessary.
+---
 
-### 2.4 Initial ODrive Setup (illustrative values)
-> Use `odrivetool` or API. Adjust to your motors’ datasheets.
+### 2.3 配線指針
+- **モータ配線：** U/V/W → ODrive M0/M1 出力端子  
+- **エンコーダ配線：** A+/A−, B+/B−, Z+/Z− → ODrive入力  
+　ツイストペア＆シールド使用（片側のみ接地）  
+- **接地：** 電源負極を基準としたスタ―接地推奨  
+- **E-Stop:** 電源リレーを直接遮断する構成  
+- **ノイズ対策:** 電力線と信号線を分離し、必要に応じてフェライト追加  
 
+---
+
+### 2.4 初期設定例（odrivetool）
 ```
-# Bus/regeneration
 odrv.config.dc_bus_undervoltage_trip_level = 20.0
 odrv.config.dc_bus_overvoltage_trip_level  = 56.0
-odrv.config.dc_max_negative_current        = 0.0   # disable regen into PSU
+odrv.config.dc_max_negative_current        = 0.0
 
-# Axis 0 (repeat for Axis 1 with appropriate values)
-axis.motor.config.pole_pairs            = <pp>
-axis.motor.config.torque_constant       = <Kt_Nm_per_A>
-axis.motor.config.current_lim           = 30.0
-axis.motor.config.requested_current_range = 40.0
+axis.motor.config.pole_pairs               = <pp>
+axis.motor.config.torque_constant          = <Kt [N·m/A]>
+axis.motor.config.current_lim              = 30.0
+axis.motor.config.requested_current_range  = 40.0
 
-axis.encoder.config.cpr                 = 8192
-axis.encoder.config.mode                = ENCODER_MODE_INCREMENTAL
-axis.encoder.config.use_index           = True
-axis.encoder.config.bandwidth           = 1000.0
+axis.encoder.config.cpr                    = 8192
+axis.encoder.config.mode                   = ENCODER_MODE_INCREMENTAL
+axis.encoder.config.use_index              = True
+axis.encoder.config.bandwidth              = 1000.0
 
-axis.controller.config.control_mode     = CONTROL_MODE_TORQUE_CONTROL
-axis.controller.config.input_mode       = INPUT_MODE_PASSTHROUGH
-axis.controller.config.vel_limit        = <rad_s_limit>
+axis.controller.config.control_mode        = CONTROL_MODE_TORQUE_CONTROL
+axis.controller.config.input_mode          = INPUT_MODE_PASSTHROUGH
+axis.controller.config.vel_limit           = <rad_s_limit>
 
-# Calibration and saving
-axis.requested_state                    = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
+axis.requested_state                       = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
 odrv.save_configuration()
 ```
 
-### 2.5 Safety Checklist
-- ✅ **E-stop** cuts power; verify latch/unlatch behavior.  
-- ✅ **Fusing** present (main + per-axis recommended).  
-- ✅ **No regen** to PSU (or use dump resistor).  
-- ✅ **Thermal monitoring** enabled; driver and motors have airflow.  
-- ✅ **Torque & rate limits** enforced in software (see §5.3).  
+---
+
+### 2.5 安全確認項目
+- ✅ 非常停止スイッチで電源遮断が可能であること  
+- ✅ 各軸に過電流保護が入っていること  
+- ✅ 回生電流が電源に戻らない構成（必要ならダンプ抵抗）  
+- ✅ 冷却と熱監視が十分であること  
+- ✅ トルクおよび速度の上限がソフトウェアで設定されていること  
 
 ---
 
-## 3. Kinematics & Dynamics (recap)
-- Output speed: `ω_out = a0·ω0 + a1·ω1`  
-- Output torque: `τ_out = a0·τ0 + a1·τ1`  
-- Weighted minimum-norm split (assist weight `w1`):  
+## 3. 制御系概要
+- 出力角速度： `ω_out = a0·ω0 + a1·ω1`  
+- 出力トルク： `τ_out = a0·τ0 + a1·τ1`  
+- 最小ノルムトルク分配（重み付き）：  
   ```
-  [τ0, τ1]^T = W·A^T·(A·W·A^T)^{-1} · τ_out_aug,
+  [τ0, τ1]^T = W·A^T·(A·W·A^T)^(-1) · τ_out_aug
   W = diag(1, w1)
   ```
 
 ---
 
-## 4. Control Overview
+## 4. 制御アルゴリズム
 
-### 4.1 Position Controller (outer loop)
-PID + feedforward:
+### 4.1 位置制御（外側ループ）
 ```
 τ_out_cmd = Kp·e_θ + Kd·e_ω + Ki·∫e_θ + J_nom·θ̈_ref + b_nom·θ̇_ref
 ```
-- Target bandwidth: **3–6 Hz** (host @ 200 Hz loop).
+- 帯域：3〜6 Hz（200 Hz制御周期を想定）
 
-### 4.2 Disturbance Observer (DOB)
+### 4.2 外乱オブザーバ（DOB）
 ```
 d̂ = Q(s)·[J_nom·ω̇ + b_nom·ω − τ_out_cmd]
 τ_out_aug = τ_out_cmd − d̂
 ```
-- Low-pass cutoff **10–20 Hz**; discrete α = `1 − exp(−2π f_c Ts)`.
+- カットオフ周波数：10〜20 Hz  
+- 離散化： `α = 1 − exp(−2π f_c Ts)`  
 
-### 4.3 Assist-as-Needed (A/N)
-Load ratio on Motor0:
+### 4.3 Assist-as-Needed制御（A/N）
 ```
 r_τ = |τ_out_aug / a0| / τ0,max
 ON if r_τ ≥ 0.65; OFF if r_τ ≤ 0.55
@@ -123,40 +127,42 @@ ṡ = (1/τ_s)(s* − s), τ_s ≈ 0.15 s
 w1(s) = w_off^(1−s) · w_on^s
 ```
 
-### 4.4 Torque Limits and Projection
-Before sending `[τ0, τ1]`, project onto safety set `𝔅`:
+### 4.4 トルク制限および再投影
 ```
-|τ_i| ≤ τ_i,max,   |dτ_i/dt| ≤ ρ_i,   sign consistency (same direction assist)
+|τ_i| ≤ τ_i,max,   |dτ_i/dt| ≤ ρ_i,   sign(τ0) = sign(τ1)
 ```
 
 ---
 
-## 5. Execution Layout (files)
-
-| File | Role |
-|---|---|
-| `main_control_odrive.py` | Main control loop (host @ 200 Hz) |
-| `odrive_interface.py` | ODrive comms (USB/CAN), torque set/readback |
-| `dob_estimator.py` | Disturbance Observer |
-| `position_controller.py` | PID + feedforward |
-| `assist_manager.py` | A/N logic (thresholds, smoothing) |
-| `torque_distribution.py` | Weighted min-norm torque split |
-| `identification.py` | J_nom, b_nom identification |
-| `logger.py` | CSV logging & health |
-| `config/*.yaml` | Parameters (A, limits, gains, DOB, A/N) |
-
----
-
-## 6. Identification (J_nom, b_nom)
-1) Disable A/N, hold Motor1 off.  
-2) Apply a ramp torque (e.g., 0 → 0.3 N·m in ~80 ms; hold ~200 ms).  
-3) Sample `ω`, estimate `ω̇` (LPF + Savitzky–Golay).  
-4) Solve least-squares for `J, b` with `τ ≈ J·ω̇ + b·ω`.  
-5) Validate by comparing predicted `τ_pred` vs actual τ (±10% target).
+## 5. ファイル構成
+| ファイル名 | 役割 |
+|-------------|------|
+| main_control_odrive.py | メイン制御ループ（200 Hz） |
+| odrive_interface.py | ODrive通信制御（USB/CAN） |
+| dob_estimator.py | 外乱推定器 |
+| position_controller.py | PID + フィードフォワード |
+| assist_manager.py | A/N制御ロジック |
+| torque_distribution.py | トルク分配計算 |
+| identification.py | 慣性・粘性係数同定 |
+| logger.py | ログ保存処理 |
+| config/*.yaml | パラメータ設定ファイル群 |
 
 ---
 
-## 7. Parameters (example)
+## 6. 同定手順（J_nom, b_nom）
+1. A/N制御を無効化（Motor1を固定）  
+2. τ_out にランプ入力（例：0→0.3 N·m）  
+3. ω, ω̇ をLPF処理して取得  
+4. 最小二乗法で推定：  
+   ```
+   [J_eq, b_eq]^T = (Φ^TΦ)^(-1)Φ^T τ
+   Φ = [ω̇, ω]
+   ```
+5. 推定精度を±10%以内で確認
+
+---
+
+## 7. パラメータ例
 ```
 A = [-0.05, 0.0815]
 J_nom = 0.015  # kg·m²
@@ -169,17 +175,17 @@ A/N thresholds: on=0.65, off=0.55, τ_s=0.15 s
 
 ---
 
-## 8. Commissioning Checklist
-- Position loop stable (≤ 6 Hz), DOB enabled (≤ 20 Hz).  
-- Smooth A/N engagement/disengagement, no torque steps.  
-- `[τ0, τ1]` within limits and project properly.  
-- No encoder faults; index alignment verified.  
-- E-stop and power path verified under load.
+## 8. 確認項目
+- 位置ループ安定（帯域6Hz以下）  
+- DOB応答安定（カットオフ20Hz以下）  
+- A/N制御ON/OFF時にトルク段差なし  
+- トルク飽和・符号不整合がないこと  
+- エンコーダインデックス整合確認済み  
+- 非常停止動作確認済み
 
 ---
 
-## 9. Notes
-- For USB jitter, consider moving to **CAN** for lower latency.  
-- If regen is required, add a dump resistor and configure ODrive accordingly.  
-- Keep encoder and power wiring separated; use star ground.
-
+## 9. 備考
+- USB通信のジッタが問題となる場合、CAN通信に移行推奨。  
+- 回生を有効にする場合、ダンプ抵抗を実装。  
+- 配線は電力系と信号系を分離し、接地は一点アース。  
