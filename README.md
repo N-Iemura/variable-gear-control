@@ -73,6 +73,8 @@ axis.controller.config.vel_limit           = <rad_s_limit>
 
 axis.requested_state                       = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
 odrv.save_configuration()
+
+※ 実運用では Web GUI で詳細パラメータを設定し、スクリプト側ではトルク制御モード移行とトルク定数の設定のみを行う想定。
 ```
 
 ---
@@ -182,4 +184,11 @@ A/N thresholds: on=0.65, off=0.55, τ_s=0.15 s
 ## 9. 備考
 - USB通信のジッタが問題となる場合、CAN通信に移行推奨。  
 - 回生を有効にする場合、ダンプ抵抗を実装。  
-- 配線は電力系と信号系を分離し、接地は一点アース。  
+- 配線は電力系と信号系を分離し、接地は一点アース。
+
+---
+
+## 10. ログ保存と可視化
+- `main_control_odrive.py` を実行すると、制御中のデータを `csv/` に時系列CSVとして保存。
+- Matplotlib が使用可能な場合は、同じファイル名で `fig/` にPDFプロットを自動生成。
+- 保存先やファイル名接頭辞は `config/logger.yaml` で変更可能。

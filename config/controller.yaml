@@ -1,0 +1,76 @@
+control_frequency_hz: 200
+sample_time_s: 0.005
+
+plant:
+  inertia: 0.015000
+  damping: 0.002000
+  mechanism_matrix: [-0.05, 0.0815]
+  motor_output_gains: [20.0, 12.26993865]
+
+outer_pid:
+  kp: 1.0
+  ki: 0.8
+  kd: 0.001
+  max_output: 200.0
+
+per_motor_pid:
+  enable_outer_loop: true
+  derivative_mode: error
+  derivative_filter_alpha: 0.2
+  motor0:
+    kp: 2.81
+    ki: 0.02
+    kd: 0.05
+    max_output: 5.0
+  motor1:
+    kp: 0.05
+    ki: 0.03
+    kd: 0.01
+    max_output: 0.2
+
+assist_manager:
+  enabled: true
+  primary_motor: motor0
+  release_start_ratio: 0.5
+  release_full_ratio: 0.9
+  torque_thresholds:
+    activate: 0.65
+    deactivate: 0.55
+  weighting:
+    hold:
+      motor0: 1.0
+      motor1: 100000.0
+    release:
+      motor0: 0.1666666667
+      motor1: 1.0
+  secondary_gain:
+    hold: 0.0
+    release: 1.0
+  weight_limits:
+    w_off: 100000.0
+    w_on: 1.0
+  time_constant: 0.15
+
+torque_preference:
+  preferred_motor: motor0
+  secondary_gain: 0.0
+
+torque_limits:
+  motor0: 6.0
+  motor1: 1.0
+
+torque_rate_limits:
+  motor0: 100.0
+  motor1: 100.0
+
+freeze:
+  motor: null
+  kp: 0.1
+  kd: 0.002
+
+sign_enforcement:
+  enabled: true
+  tolerance: 1.0e-3
+
+dob:
+  cutoff_hz: 20.0
