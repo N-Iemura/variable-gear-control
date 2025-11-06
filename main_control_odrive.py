@@ -54,6 +54,8 @@ class ReferenceGenerator:
             return self._ramp_b(profile_cfg, elapsed)
         if self.profile == "ramp_step":
             return self._ramp_step(profile_cfg, elapsed)
+        if self.profile == "pulse":
+            return self._pulse(profile_cfg, elapsed)
         if self.profile == "nstep":
             return self._nstep(profile_cfg, elapsed)
         raise KeyError(f"Unsupported profile: {self.profile}")
@@ -115,6 +117,10 @@ class ReferenceGenerator:
             if wait_value is not None:
                 values = [wait_value] + values
             return self._normalize_filename_values(values)
+        if profile == "pulse":
+            start_value = float(cfg.get("start_value", 0.0))
+            end_value = float(cfg.get("end_value", start_value))
+            return self._normalize_filename_values([start_value, end_value])
         return None
 
     def resolve_command_values(
@@ -244,6 +250,18 @@ class ReferenceGenerator:
                     f"repeat={cfg.get('repeat', True)}",
                 ]
             )
+        if profile == "pulse":
+            return ", ".join(
+                [
+                    f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
+                    f"start={fmt(cfg.get('start_value', 0.0))}",
+                    f"end={fmt(cfg.get('end_value', 0.0))}",
+                    f"rise={fmt(cfg.get('ramp_duration', 0.0))}s",
+                    f"hold={fmt(cfg.get('hold_duration', 0.0))}s",
+                    f"fall={fmt(cfg.get('return_duration', 0.0))}s",
+                    f"repeat={cfg.get('repeat', True)}",
+                ]
+            )
         return ""
 
     def _step(self, cfg: Dict[str, object], t: float) -> PositionCommand:
@@ -368,6 +386,10 @@ class ReferenceGenerator:
             return PositionCommand(base.position + amplitude, base.velocity, base.acceleration)
         return base
 
+    def _pulse(self, cfg: Dict[str, object], t: float) -> PositionCommand:
+        """Symmetric ramp-hold-return signal used for sharp torque pulses."""
+        return self._ramp(cfg, t)
+
     def _nstep(self, cfg: Dict[str, object], t: float) -> PositionCommand:
         wait = float(cfg.get("initial_wait", 0.0))
         values = list(cfg.get("values", []))
@@ -485,6 +507,8 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     start_time = time.time()
     loop_time = start_time
     running = True
+    prev_loop_time = start_time
+    loop_intervals: list[float] = []
 
     try:
         while running:
@@ -519,14 +543,24 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             motor0_state = states["motor0"]
             motor1_state = states["motor1"]
 
+            loop_dt_actual = now - prev_loop_time
             logger.log(
                 elapsed,
-                motor0={"pos": motor0_state.position, "vel": motor0_state.velocity, "torque": tau_alloc[0]},
-                motor1={"pos": motor1_state.position, "vel": motor1_state.velocity, "torque": tau_alloc[1]},
-                output={"pos": output_state.position, "vel": output_state.velocity},
-                reference={"position": command.position, "control": tau_cmd},
-                torques={"output": tau_aug},
+                motor0_state.position,
+                motor0_state.velocity,
+                tau_alloc[0],
+                motor1_state.position,
+                motor1_state.velocity,
+                tau_alloc[1],
+                output_state.position,
+                output_state.velocity,
+                command.position,
+                tau_cmd,
+                tau_aug,
+                loop_dt=loop_dt_actual,
             )
+            loop_intervals.append(loop_dt_actual)
+            prev_loop_time = now
 
             # Maintain timing
             loop_time += dt
@@ -544,6 +578,15 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             "DurationSec": f"{time.time() - start_time:.3f}",
             "SampleTime": f"{dt}",
         }
+        if loop_intervals:
+            metadata.update(
+                {
+                    "LoopDtMean": f"{float(np.mean(loop_intervals)):.6f}",
+                    "LoopDtStd": f"{float(np.std(loop_intervals)):.6f}",
+                    "LoopDtMin": f"{float(np.min(loop_intervals)):.6f}",
+                    "LoopDtMax": f"{float(np.max(loop_intervals)):.6f}",
+                }
+            )
         save_result = logger.save(metadata=metadata)
         csv_path = save_result.get("csv")
         fig_path = save_result.get("figure")

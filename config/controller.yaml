@@ -1,16 +1,16 @@
-control_frequency_hz: 200
-sample_time_s: 0.005
+control_frequency_hz: 100
+sample_time_s: 0.01
 
 plant:
-  inertia: 0.015000
-  damping: 0.002000
-  mechanism_matrix: [-0.05, 0.0815]
-  motor_output_gains: [20.0, 12.26993865]
+  inertia: 0.009967215896643318
+  damping: 8.172049793342932
+  mechanism_matrix: [-20.0, 12.26993865]
+  motor_output_gains: [-20.0, 12.26993865]
 
 outer_pid:
-  kp: 1.0
-  ki: 0.8
-  kd: 0.001
+  kp: 40.0
+  ki: 10.0
+  kd: 1.0
   max_output: 200.0
 
 per_motor_pid:
@@ -19,8 +19,8 @@ per_motor_pid:
   derivative_filter_alpha: 0.2
   motor0:
     kp: 2.81
-    ki: 0.02
-    kd: 0.05
+    ki: 1.0
+    kd: 0.1
     max_output: 5.0
   motor1:
     kp: 0.05
@@ -34,7 +34,7 @@ assist_manager:
   release_start_ratio: 0.5
   release_full_ratio: 0.9
   torque_thresholds:
-    activate: 0.65
+    activate: 0.55
     deactivate: 0.55
   weighting:
     hold:
@@ -49,7 +49,7 @@ assist_manager:
   weight_limits:
     w_off: 100000.0
     w_on: 1.0
-  time_constant: 0.15
+  time_constant: 0.05
 
 torque_preference:
   preferred_motor: motor0
@@ -64,7 +64,7 @@ torque_rate_limits:
   motor1: 100.0
 
 freeze:
-  motor: null
+  motor: None
   kp: 0.1
   kd: 0.002
 
@@ -77,10 +77,10 @@ dob:
 
 identification:
   initial_wait: 1.0        # [s] idle before ramp starts
-  target_torque: 3.0       # [Nm] desired output torque amplitude
-  ramp_duration: 2.0       # [s] 0 -> target ramp time
-  hold_duration: 1.0       # [s] hold at target torque
-  return_duration: 2.0     # [s] target -> 0 ramp back time
-  rest_duration: 1.0       # [s] stay at 0 torque after cycle
-  repeat: false            # true to loop the pattern
+  target_torque: 20.0      # [Nm] desired output torque amplitude
+  ramp_duration: 3.0       # [s] 0 -> target ramp time
+  hold_duration: 2.0       # [s] hold at target torque
+  return_duration: 3.0     # [s] target -> 0 ramp back time
+  rest_duration: 2.0       # [s] stay at 0 torque after cycle
+  repeat: true             # true to loop the pattern
   motor_freeze: motor1     # motor to keep at 0 torque during experiment

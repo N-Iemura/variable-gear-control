@@ -99,8 +99,16 @@ class ODriveAxisHandle:
     def _resolve_position_velocity(self) -> tuple[float, float]:
         mapper = getattr(self.axis, "pos_vel_mapper", None)
         if mapper is not None:
-            position = float(getattr(mapper, "pos_rel", getattr(mapper, "pos_abs", 0.0)))
-            velocity = float(getattr(mapper, "vel_rel", getattr(mapper, "vel_estimate", 0.0)))
+            position = 0.0
+            for attr in ("pos_rel", "pos", "pos_estimate", "pos_abs"):
+                if hasattr(mapper, attr):
+                    position = float(getattr(mapper, attr))
+                    break
+            velocity = 0.0
+            for attr in ("vel", "vel_rel", "vel_estimate"):
+                if hasattr(mapper, attr):
+                    velocity = float(getattr(mapper, attr))
+                    break
             return position, velocity
 
         encoder = getattr(self.axis, "encoder", None)

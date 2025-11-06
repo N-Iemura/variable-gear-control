@@ -1,0 +1,10 @@
+task: latest_run
+csv_path: /home/naga/variable-gear-control/csv/dob_20251106_185425.csv
+velocity_column: output_vel
+torque_column: tau_out
+position_column: output_pos
+filter_alpha: 0.2
+velocity_min_std: 1.0e-06
+inertia: 0.009967215896643318
+damping: 8.172049793342932
+residual_norm: 4792.180502621507

@@ -28,6 +28,7 @@ class LogRecord:
     theta_ref: float
     theta_ctrl: float
     tau_out: float
+    loop_dt: float = 0.0
 
 
 @dataclass
@@ -44,25 +45,33 @@ class DataLogger:
     def log(
         self,
         time_stamp: float,
-        motor0: Dict[str, float],
-        motor1: Dict[str, float],
-        output: Dict[str, float],
-        reference: Dict[str, float],
-        torques: Dict[str, float],
+        motor0_pos: float,
+        motor0_vel: float,
+        motor0_torque: float,
+        motor1_pos: float,
+        motor1_vel: float,
+        motor1_torque: float,
+        output_pos: float,
+        output_vel: float,
+        reference_position: float,
+        reference_control: float,
+        tau_out: float,
+        loop_dt: Optional[float] = None,
     ) -> None:
         record = LogRecord(
             time=time_stamp,
-            motor0_pos=float(motor0.get("pos", 0.0)),
-            motor0_vel=float(motor0.get("vel", 0.0)),
-            motor0_torque=float(motor0.get("torque", 0.0)),
-            motor1_pos=float(motor1.get("pos", 0.0)),
-            motor1_vel=float(motor1.get("vel", 0.0)),
-            motor1_torque=float(motor1.get("torque", 0.0)),
-            output_pos=float(output.get("pos", 0.0)),
-            output_vel=float(output.get("vel", 0.0)),
-            theta_ref=float(reference.get("position", 0.0)),
-            theta_ctrl=float(reference.get("control", 0.0)),
-            tau_out=float(torques.get("output", 0.0)),
+            motor0_pos=float(motor0_pos),
+            motor0_vel=float(motor0_vel),
+            motor0_torque=float(motor0_torque),
+            motor1_pos=float(motor1_pos),
+            motor1_vel=float(motor1_vel),
+            motor1_torque=float(motor1_torque),
+            output_pos=float(output_pos),
+            output_vel=float(output_vel),
+            theta_ref=float(reference_position),
+            theta_ctrl=float(reference_control),
+            tau_out=float(tau_out),
+            loop_dt=float(loop_dt) if loop_dt is not None else 0.0,
         )
         self.records.append(record)
 
@@ -124,6 +133,7 @@ class DataLogger:
                     "theta_ref",
                     "theta_ctrl",
                     "tau_out",
+                    "loop_dt",
                 ]
             )
             for record in self.records:
@@ -141,6 +151,7 @@ class DataLogger:
                         record.theta_ref,
                         record.theta_ctrl,
                         record.tau_out,
+                        record.loop_dt,
                     ]
                 )
         figure_path = self._save_plot(csv_path, command_values)

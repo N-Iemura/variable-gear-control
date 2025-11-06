@@ -1,0 +1,16 @@
+# Profile=pulse
+# ProfileLabel=pulse
+# CommandValues=0
+# Settings=
+# ControlMode=per_motor_pid(outer=on)
+# OutputPID=kp=40.0,ki=20.0,kd=1.0,max=200.0
+# MotorPID_motor0=kp=2.81,ki=1.0,kd=0.1,max=5.0
+# MotorPID_motor1=kp=0.05,ki=0.03,kd=0.01,max=0.2
+# PIDDerivativeMode=error
+# PIDDerivativeFilterAlpha=0.2
+# Nullspace=disabled
+# Freeze=motor=None,kp=0.1,kd=0.002
+# TorqueLimits=[0, 0]
+# DurationSec=0.002
+# SampleTime=0.005
+time,motor0_pos,motor0_vel,motor0_torque,motor1_pos,motor1_vel,motor1_torque,output_pos,output_vel,theta_ref,theta_ctrl,tau_out

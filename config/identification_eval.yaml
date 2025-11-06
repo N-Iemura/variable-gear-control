@@ -1,0 +1,9 @@
+tasks:
+  - name: latest_run
+    csv_path: /home/naga/variable-gear-control/csv/dob_20251106_185425.csv
+    velocity_column: output_vel
+    position_column: output_pos
+    torque_column: tau_out
+    filter_alpha: 0.2
+    velocity_min_std: 1e-6
+    output_file: config/identified_plant.yaml
