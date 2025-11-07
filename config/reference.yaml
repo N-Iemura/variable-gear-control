@@ -9,22 +9,22 @@ step:
 
 sine:
   initial_wait: 1.0
-  output_amplitude: 0.1
+  output_amplitude: 0.5
   frequency_hz: 0.1
   offset: 0.0
 
 chirp:
   initial_wait: 1.0
   output_amplitude: 0.2
-  start_frequency_hz: 0.02
-  end_frequency_hz: 0.2
+  start_frequency_hz: 0.002
+  end_frequency_hz: 0.02
   duration: 60.0
   offset: 0.0
 
 ramp:
   initial_wait: 1.0
   start_value: 0.0
-  end_value: 5.0
+  end_value: -5.0
   ramp_duration: 10.0
   hold_duration: 5.0
   return_duration: 0.0
@@ -33,8 +33,8 @@ ramp:
 ramp_b:
   initial_wait: 1.0
   start_value: 0.0
-  end_value: 1.0
-  ramp_duration: 1.0
+  end_value: 0.5
+  ramp_duration: 2.0
   hold_duration: 0.0
   return_duration: 1.0
   start_hold_duration: 0.0
@@ -49,7 +49,7 @@ ramp_step:
   return_duration: 0.0
   repeat: false
   step:
-    amplitude: -0.5
+    amplitude: -1.0
     duration: 20.0
     start_after: -0.01
     repeat: false
@@ -59,7 +59,7 @@ ramp_step:
 
 nstep:
   initial_wait: 1.0
-  values: [0.1, 0, -0.1, 0.0]
+  values: [0.2, 0, -0.2, 0.0]
   hold_duration: 3.0
   repeat: true
   wait_value: 0.0
