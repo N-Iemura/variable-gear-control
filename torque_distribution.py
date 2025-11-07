@@ -106,15 +106,15 @@ class TorqueAllocator:
     ) -> None:
         self.A = np.asarray(mechanism_matrix, dtype=float).reshape(1, 2)
         self.torque_limits = np.array(
-            [abs(float(torque_limits.get("motor0", 1.0))), abs(float(torque_limits.get("motor1", 1.0)))],
+            [abs(float(torque_limits.get("motor1", 1.0))), abs(float(torque_limits.get("motor2", 1.0)))],
             dtype=float,
         )
         self.dt = float(dt)
         rate_limits = rate_limits or {}
         self.rate_limits = np.array(
             [
-                max(0.0, float(rate_limits.get("motor0", math.inf))),
                 max(0.0, float(rate_limits.get("motor1", math.inf))),
+                max(0.0, float(rate_limits.get("motor2", math.inf))),
             ],
             dtype=float,
         )
@@ -152,7 +152,7 @@ class TorqueAllocator:
         tau = np.asarray(tau, dtype=float).reshape(2).copy()
         if self.preferred_motor is None:
             return tau
-        secondary_idx = 1 if self.preferred_motor == "motor0" else 0
+        secondary_idx = 1 if self.preferred_motor == "motor1" else 0
         gain = max(0.0, min(1.0, float(secondary_gain)))
         tau[secondary_idx] *= gain
         return tau

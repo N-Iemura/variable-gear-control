@@ -520,7 +520,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             command = reference.sample(elapsed)
 
             states = odrive_iface.read_states()
-            output_state = states.get("output", states["motor0"])
+            output_state = states.get("output", states["motor1"])
 
             feedback = PositionFeedback(
                 position=output_state.position,
@@ -540,17 +540,17 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             tau_alloc, alloc_diag = allocator.allocate(tau_aug, weights, secondary_gain)
             odrive_iface.command_torques(float(tau_alloc[0]), float(tau_alloc[1]))
 
-            motor0_state = states["motor0"]
             motor1_state = states["motor1"]
+            motor2_state = states["motor2"]
 
             loop_dt_actual = now - prev_loop_time
             logger.log(
                 elapsed,
-                motor0_state.position,
-                motor0_state.velocity,
-                tau_alloc[0],
                 motor1_state.position,
                 motor1_state.velocity,
+                tau_alloc[0],
+                motor2_state.position,
+                motor2_state.velocity,
                 tau_alloc[1],
                 output_state.position,
                 output_state.velocity,

@@ -17,20 +17,20 @@ per_motor_pid:
   enable_outer_loop: true
   derivative_mode: measurement
   derivative_filter_alpha: 0.05
-  motor0:
+  motor1:
     kp: 2.81
     ki: 1.0
     kd: 0.1
     max_output: 5.0
-  motor1:
-    kp: 0.05
-    ki: 0.03
-    kd: 0.01
+  motor2:
+    kp: 1.1
+    ki: 0.5
+    kd: 0.05
     max_output: 0.2
 
 assist_manager:
   enabled: true
-  primary_motor: motor0
+  primary_motor: motor1
   release_start_ratio: 0.5
   release_full_ratio: 0.9
   torque_thresholds:
@@ -38,11 +38,11 @@ assist_manager:
     deactivate: 0.10
   weighting:
     hold:
-      motor0: 1.0
-      motor1: 100000.0
+      motor1: 1.0
+      motor2: 100000.0
     release:
-      motor0: 0.1666666667
-      motor1: 0.016667
+      motor1: 0.1666666667
+      motor2: 0.016667
   secondary_gain:
     hold: 0.0
     release: 1.0
@@ -52,16 +52,16 @@ assist_manager:
   time_constant: 0.05
 
 torque_preference:
-  preferred_motor: motor0
+  preferred_motor: motor1
   secondary_gain: 0.0
 
 torque_limits:
-  motor0: 6.0
-  motor1: 1.0
+  motor1: 6.0
+  motor2: 1.0
 
 torque_rate_limits:
-  motor0: 100.0
   motor1: 100.0
+  motor2: 100.0
 
 freeze:
   motor: None
@@ -83,4 +83,4 @@ identification:
   return_duration: 3.0     # [s] target -> 0 ramp back time
   rest_duration: 2.0       # [s] stay at 0 torque after cycle
   repeat: true             # true to loop the pattern
-  motor_freeze: motor1     # motor to keep at 0 torque during experiment
+  motor_freeze: motor2     # motor to keep at 0 torque during experiment

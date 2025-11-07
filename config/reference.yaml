@@ -49,7 +49,7 @@ ramp_step:
   return_duration: 0.0
   repeat: false
   step:
-    amplitude: -1.0
+    amplitude: -0.5
     duration: 20.0
     start_after: -0.01
     repeat: false

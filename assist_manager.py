@@ -28,8 +28,8 @@ class AssistManager:
     ) -> None:
         self.dt = float(dt)
         self.A = np.asarray(mechanism_matrix, dtype=float).reshape(2)
-        self.primary_motor = str(config.get("primary_motor", "motor0"))
-        self.primary_index = 0 if self.primary_motor == "motor0" else 1
+        self.primary_motor = str(config.get("primary_motor", "motor1"))
+        self.primary_index = 0 if self.primary_motor == "motor1" else 1
         self.secondary_index = 1 - self.primary_index
         torque_limits = dict(torque_limits)
         self.primary_limit = abs(float(torque_limits.get(self.primary_motor, 1.0)))
@@ -45,15 +45,15 @@ class AssistManager:
         weighting_cfg = config.get("weighting", {})
         self.weights_hold = np.array(
             [
-                float(weighting_cfg.get("hold", {}).get("motor0", 1.0)),
                 float(weighting_cfg.get("hold", {}).get("motor1", 1.0)),
+                float(weighting_cfg.get("hold", {}).get("motor2", 1.0)),
             ],
             dtype=float,
         )
         self.weights_release = np.array(
             [
-                float(weighting_cfg.get("release", {}).get("motor0", 1.0)),
                 float(weighting_cfg.get("release", {}).get("motor1", 1.0)),
+                float(weighting_cfg.get("release", {}).get("motor2", 1.0)),
             ],
             dtype=float,
         )

@@ -4,7 +4,7 @@
 目的:
 - 出力角θのみを外側PIDで追従
 - モータ重み付き最小ノルムで出力トルク τ_out* を各モータへ配分
-- motor0 を優先しつつ、負荷が高まった際に motor1 を自動解放して可変減速比を実現
+- motor1 を優先しつつ、負荷が高まった際に motor2 を自動解放して可変減速比を実現
 - 既存のODriveトルクモードにそのまま繋ぐ
 
 使い方:
@@ -135,24 +135,24 @@ PID_DERIVATIVE_FILTER_ALPHA = 0.2
 
 # 各モータ用PIDゲイン（CONTROL_MODE='per_motor_pid' のとき使用）
 MOTOR_PID = {
-    'motor0': {'kp': 2.81, 'ki': 0.02, 'kd': 0.05, 'max_output': 5.0},   # T-motor
-    'motor1': {'kp': 0.05, 'ki': 0.03, 'kd': 0.01, 'max_output': 0.2}     # Maxon
+    'motor1': {'kp': 2.81, 'ki': 0.02, 'kd': 0.05, 'max_output': 5.0},   # T-motor
+    'motor2': {'kp': 0.05, 'ki': 0.03, 'kd': 0.01, 'max_output': 0.2}     # Maxon
 }
 
 # 関節基準姿勢（必要に応じて調整）
 JOINT_REFERENCE = np.array([0.0, 0.0], dtype=float)
 
-# 可変減速制御設定（motor0 の負荷比で motor1 の寄与を補間）
+# 可変減速制御設定（motor1 の負荷比で motor2 の寄与を補間）
 VARIABLE_RATIO_CONFIG = {
     'enabled': True,
-    'primary_motor': 'motor0',        # 通常トルクを担う側
+    'primary_motor': 'motor1',        # 通常トルクを担う側
     'release_start_ratio': 0.5,      # この比率を超えると開放を開始
     'release_full_ratio': 0.9,        # この比率で完全開放
     'secondary_gain_hold': 0.0,       # ホールド時の secondary_gain
     'secondary_gain_release': 1.0,    # 開放時の secondary_gain
 }
 
-# 片側モータを固定する場合の設定（'motor0' / 'motor1' / None）
+# 片側モータを固定する場合の設定（'motor1' / 'motor2' / None）
 FREEZE_CONFIG = {
     'motor_to_freeze': 'None',
     'kp': 0.1,
@@ -161,7 +161,7 @@ FREEZE_CONFIG = {
 
 # モータ使用バイアス設定（preferred_motor を優先し、もう一方を抑える）
 TORQUE_PREFERENCE = {
-    'preferred_motor': 'motor0',  # 'motor0', 'motor1', または None
+    'preferred_motor': 'motor1',  # 'motor1', 'motor2', または None
     'secondary_gain': 0.0,        # 0.0 で完全抑制, 1.0 でバイアス無し
 }
 
@@ -169,12 +169,12 @@ TORQUE_PREFERENCE = {
 # hold/release を切り替えて可変減速の状態に応じた重みを指定可能
 TORQUE_WEIGHTING = {
     'hold': {
-        'motor0': 1.0,
-        'motor1': 100000.0,
+        'motor1': 1.0,
+        'motor2': 100000.0,
     },
     'release': {
-        'motor0': 1.0/6.0,
-        'motor1': 1.0,
+        'motor1': 1.0/6.0,
+        'motor2': 1.0,
     },
 }
 
@@ -186,13 +186,13 @@ SAFETY_CONFIG = {
 
 # ODrive接続設定（必要に応じて変更）
 ODRIVE_SERIAL = {
-    'motor0': '3856345D3539',  # T-motor 側
-    'motor1': '384D346F3539',  # Maxon 側
+    'motor1': '3856345D3539',  # T-motor 側
+    'motor2': '384D346F3539',  # Maxon 側
     'output': '3849346F3539',  # 出力エンコーダ
 }
 ODRIVE_TORQUE_CONSTANT = {
-    'motor0': 0.106,  # Nm/A
-    'motor1': 0.091,  # Nm/A
+    'motor1': 0.106,  # Nm/A
+    'motor2': 0.091,  # Nm/A
 }
 
 # 制御周期 [Hz]
@@ -216,8 +216,8 @@ FILENAME_DECIMALS = 4
 def _get_weight_vector(mode):
     cfg = TORQUE_WEIGHTING.get(mode, TORQUE_WEIGHTING.get('release', {}))
     w = np.array([
-        float(cfg.get('motor0', 1.0)),
         float(cfg.get('motor1', 1.0)),
+        float(cfg.get('motor2', 1.0)),
     ], dtype=float)
     if np.any(w <= 0.0):
         raise ValueError("TORQUE_WEIGHTING の値は正の実数である必要があります。")
@@ -354,7 +354,7 @@ def _solve_torque_with_limits(
         if best is None or score < best[0]:
             best = (score, tau_vec, tau_out)
 
-    # motor0 を限界に貼り付け
+    # motor1 を限界に貼り付け
     if abs(a2) > eps:
         for s0 in (-1, 1):
             t0 = s0 * limits[0]
@@ -362,7 +362,7 @@ def _solve_torque_with_limits(
             if abs(t1) <= limits[1] + 1e-6:
                 evaluate_candidate(np.array([t0, t1], dtype=float))
 
-    # motor1 を限界に貼り付け
+    # motor2 を限界に貼り付け
     if abs(a1) > eps:
         for s1 in (-1, 1):
             t1 = s1 * limits[1]
@@ -391,9 +391,9 @@ def _apply_torque_preference(tau_candidate):
     gain = float(TORQUE_PREFERENCE.get('secondary_gain', 1.0))
     gain = float(np.clip(gain, 0.0, 1.0))
     tau_pref = np.asarray(tau_candidate, dtype=float).reshape(2)
-    if motor == 'motor0':
+    if motor == 'motor1':
         tau_pref = np.array([tau_pref[0], tau_pref[1] * gain], dtype=float)
-    elif motor == 'motor1':
+    elif motor == 'motor2':
         tau_pref = np.array([tau_pref[0] * gain, tau_pref[1]], dtype=float)
     else:
         tau_pref = tau_pref.copy()
@@ -957,8 +957,8 @@ def analyze_and_plot_response(csv_filename):
         base_command = df['theta_ref'].to_numpy(dtype=float)
     theta_ref_turn = df['theta_ref'].to_numpy(dtype=float)
     theta_turn = df['output_pos'].to_numpy(dtype=float)
-    torque1 = df['motor0_torque'].to_numpy(dtype=float)
-    torque2 = df['motor1_torque'].to_numpy(dtype=float)
+    torque1 = df['motor1_torque'].to_numpy(dtype=float)
+    torque2 = df['motor2_torque'].to_numpy(dtype=float)
     theta_ref_raw_turn = df['theta_ref_raw'].to_numpy(dtype=float) if 'theta_ref_raw' in df.columns else None
     backlash_state_turn = df['backlash_state'].to_numpy(dtype=float) if 'backlash_state' in df.columns else None
 
@@ -969,14 +969,14 @@ def analyze_and_plot_response(csv_filename):
     backlash_state_deg = turn_to_deg(backlash_state_turn) if backlash_state_turn is not None else None
 
     est_pos = _estimate_linear_map(
-        df['motor0_pos'].to_numpy(dtype=float),
         df['motor1_pos'].to_numpy(dtype=float),
+        df['motor2_pos'].to_numpy(dtype=float),
         df['output_pos'].to_numpy(dtype=float),
         include_bias=True,
     )
     est_vel = _estimate_linear_map(
-        df['motor0_vel'].to_numpy(dtype=float),
         df['motor1_vel'].to_numpy(dtype=float),
+        df['motor2_vel'].to_numpy(dtype=float),
         df['output_vel'].to_numpy(dtype=float),
         include_bias=False,
     )
@@ -1123,8 +1123,8 @@ def main():
     # ---- ODrive 接続 ----
     print("ODriveを検索中...")
     try:
-        odrv0 = odrive.find_any(serial_number=ODRIVE_SERIAL['motor0'])
-        odrv1 = odrive.find_any(serial_number=ODRIVE_SERIAL['motor1'])
+        odrv0 = odrive.find_any(serial_number=ODRIVE_SERIAL['motor1'])
+        odrv1 = odrive.find_any(serial_number=ODRIVE_SERIAL['motor2'])
         odrv2 = odrive.find_any(serial_number=ODRIVE_SERIAL['output'])
         print("ODrive接続完了")
     except Exception as e:
@@ -1140,11 +1140,11 @@ def main():
     print("モータをトルク制御モードに設定中...")
     odrv0.axis0.requested_state = AxisState.CLOSED_LOOP_CONTROL
     odrv0.axis0.controller.config.control_mode = ControlMode.TORQUE_CONTROL
-    odrv0.axis0.config.motor.torque_constant = ODRIVE_TORQUE_CONSTANT['motor0']
+    odrv0.axis0.config.motor.torque_constant = ODRIVE_TORQUE_CONSTANT['motor1']
 
     odrv1.axis0.requested_state = AxisState.CLOSED_LOOP_CONTROL
     odrv1.axis0.controller.config.control_mode = ControlMode.TORQUE_CONTROL
-    odrv1.axis0.config.motor.torque_constant = ODRIVE_TORQUE_CONSTANT['motor1']
+    odrv1.axis0.config.motor.torque_constant = ODRIVE_TORQUE_CONSTANT['motor2']
     print("モータ設定完了")
 
     # ---- コントローラ ----
@@ -1188,8 +1188,8 @@ def main():
     data_lock = threading.Lock()
     data_log = {
         'time': [],
-        'motor0': {'pos': [], 'vel': [], 'torque': []},
         'motor1': {'pos': [], 'vel': [], 'torque': []},
+        'motor2': {'pos': [], 'vel': [], 'torque': []},
         'output': {'pos': [], 'vel': []},
         'theta_ref': [],
         'theta_ctrl': [],
@@ -1201,15 +1201,15 @@ def main():
     weights_hold_vec = _get_weight_vector('hold')
     q_ref = JOINT_REFERENCE.copy()
     adaptive_enabled = bool(VARIABLE_RATIO_CONFIG.get('enabled', False))
-    primary_motor = VARIABLE_RATIO_CONFIG.get('primary_motor', 'motor0')
-    primary_idx = {'motor0': 0, 'motor1': 1}.get(primary_motor, 0)
+    primary_motor = VARIABLE_RATIO_CONFIG.get('primary_motor', 'motor1')
+    primary_idx = {'motor1': 0, 'motor2': 1}.get(primary_motor, 0)
     secondary_idx = 1 - primary_idx
     release_start_ratio = float(VARIABLE_RATIO_CONFIG.get('release_start_ratio', 0.7))
     release_full_ratio = float(VARIABLE_RATIO_CONFIG.get('release_full_ratio', 0.95))
     secondary_gain_hold = float(VARIABLE_RATIO_CONFIG.get('secondary_gain_hold', 0.0))
     secondary_gain_release = float(VARIABLE_RATIO_CONFIG.get('secondary_gain_release', 1.0))
     TORQUE_PREFERENCE['preferred_motor'] = primary_motor
-    freeze_idx_config = {'motor0': 0, 'motor1': 1}.get(FREEZE_CONFIG['motor_to_freeze'])
+    freeze_idx_config = {'motor1': 0, 'motor2': 1}.get(FREEZE_CONFIG['motor_to_freeze'])
     freeze_kp = FREEZE_CONFIG['kp']
     freeze_kd = FREEZE_CONFIG['kd']
     torque_limits = np.array([
@@ -1305,7 +1305,7 @@ def main():
 
                 q_des = q_ref + delta_q
 
-                keys = ['motor0', 'motor1']
+                keys = ['motor1', 'motor2']
                 for idx, key in enumerate(keys):
                     if current_freeze_idx is not None and idx == current_freeze_idx:
                         tau_cmd_prelimit[idx] = float(-freeze_kp * q[idx] - freeze_kd * qdot[idx])
@@ -1391,12 +1391,12 @@ def main():
             # ---- ログ ----
             with data_lock:
                 data_log['time'].append(elapsed)
-                data_log['motor0']['pos'].append(q0)
-                data_log['motor0']['vel'].append(dq0)
-                data_log['motor0']['torque'].append(float(tau_cmd[0]))
-                data_log['motor1']['pos'].append(q1)
-                data_log['motor1']['vel'].append(dq1)
-                data_log['motor1']['torque'].append(float(tau_cmd[1]))
+                data_log['motor1']['pos'].append(q0)
+                data_log['motor1']['vel'].append(dq0)
+                data_log['motor1']['torque'].append(float(tau_cmd[0]))
+                data_log['motor2']['pos'].append(q1)
+                data_log['motor2']['vel'].append(dq1)
+                data_log['motor2']['torque'].append(float(tau_cmd[1]))
                 data_log['output']['pos'].append(qout)
                 data_log['output']['vel'].append(dqout)
                 data_log['theta_ref'].append(theta_ref)
@@ -1455,8 +1455,8 @@ def main():
             f"Settings={profile_settings_text}",
             f"ControlMode={control_mode_text}",
             f"OutputPID={_fmt_pid(OUTPUT_PID)}",
-            f"MotorPID_motor0={_fmt_pid(MOTOR_PID['motor0'])}",
             f"MotorPID_motor1={_fmt_pid(MOTOR_PID['motor1'])}",
+            f"MotorPID_motor2={_fmt_pid(MOTOR_PID['motor2'])}",
             f"PIDDerivativeMode={PID_DERIVATIVE_MODE}",
             f"PIDDerivativeFilterAlpha={PID_DERIVATIVE_FILTER_ALPHA}",
             f"Nullspace={nullspace_text}",
@@ -1470,16 +1470,16 @@ def main():
             w = csv.writer(f)
             w.writerow([
                 'time',
-                'motor0_pos','motor0_vel','motor0_torque',
                 'motor1_pos','motor1_vel','motor1_torque',
+                'motor2_pos','motor2_vel','motor2_torque',
                 'output_pos','output_vel',
                 'theta_ref','theta_ctrl','tau_out'
             ])
             for i in range(len(data_log['time'])):
                 w.writerow([
                     data_log['time'][i],
-                    data_log['motor0']['pos'][i], data_log['motor0']['vel'][i], data_log['motor0']['torque'][i],
                     data_log['motor1']['pos'][i], data_log['motor1']['vel'][i], data_log['motor1']['torque'][i],
+                    data_log['motor2']['pos'][i], data_log['motor2']['vel'][i], data_log['motor2']['torque'][i],
                     data_log['output']['pos'][i], data_log['output']['vel'][i],
                     data_log['theta_ref'][i], data_log['theta_ctrl'][i], data_log['tau_out'][i]
                 ])

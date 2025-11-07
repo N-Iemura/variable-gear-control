@@ -17,12 +17,12 @@ except ImportError:  # pragma: no cover - optional dependency
 @dataclass
 class LogRecord:
     time: float
-    motor0_pos: float
-    motor0_vel: float
-    motor0_torque: float
-    motor1_pos: float
-    motor1_vel: float
-    motor1_torque: float
+    pos_1: float
+    vel_1: float
+    tau_1: float
+    pos_2: float
+    vel_2: float
+    tau_2: float
     output_pos: float
     output_vel: float
     theta_ref: float
@@ -45,12 +45,12 @@ class DataLogger:
     def log(
         self,
         time_stamp: float,
-        motor0_pos: float,
-        motor0_vel: float,
-        motor0_torque: float,
-        motor1_pos: float,
-        motor1_vel: float,
-        motor1_torque: float,
+        pos_1: float,
+        vel_1: float,
+        tau_1: float,
+        pos_2: float,
+        vel_2: float,
+        tau_2: float,
         output_pos: float,
         output_vel: float,
         reference_position: float,
@@ -60,12 +60,12 @@ class DataLogger:
     ) -> None:
         record = LogRecord(
             time=time_stamp,
-            motor0_pos=float(motor0_pos),
-            motor0_vel=float(motor0_vel),
-            motor0_torque=float(motor0_torque),
-            motor1_pos=float(motor1_pos),
-            motor1_vel=float(motor1_vel),
-            motor1_torque=float(motor1_torque),
+            pos_1=float(pos_1),
+            vel_1=float(vel_1),
+            tau_1=float(tau_1),
+            pos_2=float(pos_2),
+            vel_2=float(vel_2),
+            tau_2=float(tau_2),
             output_pos=float(output_pos),
             output_vel=float(output_vel),
             theta_ref=float(reference_position),
@@ -122,12 +122,12 @@ class DataLogger:
             writer.writerow(
                 [
                     "time",
-                    "motor0_pos",
-                    "motor0_vel",
-                    "motor0_torque",
-                    "motor1_pos",
-                    "motor1_vel",
-                    "motor1_torque",
+                    "pos_1",
+                    "vel_1",
+                    "tau_1",
+                    "pos_2",
+                    "vel_2",
+                    "tau_2",
                     "output_pos",
                     "output_vel",
                     "theta_ref",
@@ -140,12 +140,12 @@ class DataLogger:
                 writer.writerow(
                     [
                         record.time,
-                        record.motor0_pos,
-                        record.motor0_vel,
-                        record.motor0_torque,
-                        record.motor1_pos,
-                        record.motor1_vel,
-                        record.motor1_torque,
+                        record.pos_1,
+                        record.vel_1,
+                        record.tau_1,
+                        record.pos_2,
+                        record.vel_2,
+                        record.tau_2,
                         record.output_pos,
                         record.output_vel,
                         record.theta_ref,
@@ -174,8 +174,8 @@ class DataLogger:
         figure_path = figure_dir / figure_name
 
         time_data = np.asarray([rec.time for rec in self.records], dtype=float)
-        motor0_torque = np.asarray([rec.motor0_torque for rec in self.records], dtype=float)
-        motor1_torque = np.asarray([rec.motor1_torque for rec in self.records], dtype=float)
+        tau_1 = np.asarray([rec.tau_1 for rec in self.records], dtype=float)
+        tau_2 = np.asarray([rec.tau_2 for rec in self.records], dtype=float)
         output_pos = np.asarray([rec.output_pos for rec in self.records], dtype=float)
         output_vel = np.asarray([rec.output_vel for rec in self.records], dtype=float)
         theta_ref = np.asarray([rec.theta_ref for rec in self.records], dtype=float)
@@ -196,8 +196,8 @@ class DataLogger:
         axes[1].set_ylabel("ω [deg/s]")
         axes[1].legend(loc="upper right")
 
-        axes[2].plot(time_data, motor0_torque, label="τ_motor0")
-        axes[2].plot(time_data, motor1_torque, label="τ_motor1")
+        axes[2].plot(time_data, tau_1, label="τ_1")
+        axes[2].plot(time_data, tau_2, label="τ_2")
         axes[2].set_ylabel("Torque [Nm]")
         axes[2].set_xlabel("Time [s]")
         axes[2].legend(loc="upper right")
@@ -247,8 +247,8 @@ class DataLogger:
                 ("Settings", profile_settings),
                 ("ControlMode", control_mode),
                 ("OutputPID", fmt_pid(self.controller_config.get("outer_pid", {}))),
-                ("MotorPID_motor0", fmt_pid(per_motor_cfg.get("motor0", {}))),
-                ("MotorPID_motor1", fmt_pid(per_motor_cfg.get("motor1", {}))),
+                ("MotorPID_1", fmt_pid(per_motor_cfg.get("motor1", {}))),
+                ("MotorPID_2", fmt_pid(per_motor_cfg.get("motor2", {}))),
                 ("PIDDerivativeMode", derivative_mode),
                 ("PIDDerivativeFilterAlpha", f"{derivative_alpha}"),
                 ("Nullspace", "disabled"),
@@ -264,7 +264,7 @@ class DataLogger:
         lines.append(("Freeze", freeze_text))
 
         torque_limits = self.controller_config.get("torque_limits", {})
-        torque_vec = [torque_limits.get("motor0", 0.0), torque_limits.get("motor1", 0.0)]
+        torque_vec = [torque_limits.get("motor1", 0.0), torque_limits.get("motor2", 0.0)]
         lines.append(("TorqueLimits", format_vector(torque_vec)))
 
         for key, value in extra.items():

@@ -68,12 +68,12 @@ def _solve_with_freeze(A: np.ndarray, tau_out: float, freeze_idx: int) -> np.nda
     tau = np.zeros(2, dtype=float)
     if freeze_idx == 0:
         if abs(A[1]) < 1e-9:
-            raise ValueError("Mechanism gain for motor1 is too small to solve torque.")
+            raise ValueError("Mechanism gain for motor2 is too small to solve torque.")
         tau[0] = 0.0
         tau[1] = float(tau_out) / A[1]
     else:
         if abs(A[0]) < 1e-9:
-            raise ValueError("Mechanism gain for motor0 is too small to solve torque.")
+            raise ValueError("Mechanism gain for motor1 is too small to solve torque.")
         tau[1] = 0.0
         tau[0] = float(tau_out) / A[0]
     return tau
@@ -92,14 +92,14 @@ def run_identification(config_dir: Path, log_level: str) -> None:
     torque_limits_cfg = controller_cfg.get("torque_limits", {})
     torque_limits = np.array(
         [
-            float(torque_limits_cfg.get("motor0", 6.0)),
-            float(torque_limits_cfg.get("motor1", 1.0)),
+            float(torque_limits_cfg.get("motor1", 6.0)),
+            float(torque_limits_cfg.get("motor2", 1.0)),
         ],
         dtype=float,
     )
 
-    freeze_motor = identification_cfg.get("motor_freeze", "motor1")
-    freeze_idx = 0 if freeze_motor == "motor0" else 1
+    freeze_motor = identification_cfg.get("motor_freeze", "motor2")
+    freeze_idx = 0 if freeze_motor == "motor1" else 1
 
     odrive_iface = ODriveInterface(hardware_cfg)
     data_logger = DataLogger(
@@ -136,17 +136,17 @@ def run_identification(config_dir: Path, log_level: str) -> None:
             odrive_iface.command_torques(float(tau_cmd[0]), float(tau_cmd[1]))
 
             states = odrive_iface.read_states()
-            motor0_state = states["motor0"]
             motor1_state = states["motor1"]
-            output_state = states.get("output", motor0_state)
+            motor2_state = states["motor2"]
+            output_state = states.get("output", motor1_state)
 
             data_logger.log(
                 elapsed,
-                motor0_state.position,
-                motor0_state.velocity,
-                tau_cmd[0],
                 motor1_state.position,
                 motor1_state.velocity,
+                tau_cmd[0],
+                motor2_state.position,
+                motor2_state.velocity,
                 tau_cmd[1],
                 output_state.position,
                 output_state.velocity,

@@ -1,9 +1,9 @@
 odrive:
   serial_numbers:
-    motor0: "3856345D3539"
-    motor1: "384D346F3539"
+    motor1: "3856345D3539"
+    motor2: "384D346F3539"
     output: "3849346F3539"
   torque_constants:
-    motor0: 0.106
-    motor1: 0.091
+    motor1: 0.106
+    motor2: 0.091
   communication: usb

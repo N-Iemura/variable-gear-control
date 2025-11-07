@@ -139,12 +139,12 @@ class ODriveInterface:
 
     def connect(self, calibrate: bool = False) -> None:
         _LOGGER.info("Connecting to ODrive devices...")
-        motor0 = self._connect_axis("motor0", calibrate=calibrate, is_motor=True)
         motor1 = self._connect_axis("motor1", calibrate=calibrate, is_motor=True)
+        motor2 = self._connect_axis("motor2", calibrate=calibrate, is_motor=True)
         output = self._connect_axis("output", calibrate=False, is_motor=False)
 
-        self.devices["motor0"] = motor0
         self.devices["motor1"] = motor1
+        self.devices["motor2"] = motor2
         self.output_axis = output
 
         for name, axis in self.devices.items():
@@ -215,9 +215,9 @@ class ODriveInterface:
             )
         return states
 
-    def command_torques(self, tau_motor0: float, tau_motor1: float) -> None:
-        self.devices["motor0"].command_torque(tau_motor0)
+    def command_torques(self, tau_motor1: float, tau_motor2: float) -> None:
         self.devices["motor1"].command_torque(tau_motor1)
+        self.devices["motor2"].command_torque(tau_motor2)
 
     def shutdown(self) -> None:
         for handle in self.devices.values():
