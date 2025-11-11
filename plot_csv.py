@@ -11,6 +11,8 @@ from typing import Dict, Iterable, List, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
+plt.rcParams.update({"font.family": "Times New Roman"})
+
 
 def _read_log(path: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
     rows: List[Dict[str, float]] = []

@@ -10,6 +10,8 @@ import numpy as np
 
 try:
     import matplotlib.pyplot as plt
+
+    plt.rcParams.update({"font.family": "Times New Roman"})
 except ImportError:  # pragma: no cover - optional dependency
     plt = None
 
