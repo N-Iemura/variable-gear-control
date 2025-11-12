@@ -11,7 +11,16 @@ import numpy as np
 try:
     import matplotlib.pyplot as plt
 
-    plt.rcParams.update({"font.family": "Times New Roman"})
+    plt.rcParams.update(
+        {
+            "font.family": "Times New Roman",
+            "font.size": 14,
+            "mathtext.fontset": "custom",
+            "mathtext.rm": "Times New Roman",
+            "mathtext.it": "Times New Roman:italic",
+            "mathtext.bf": "Times New Roman:bold",
+        }
+    )
 except ImportError:  # pragma: no cover - optional dependency
     plt = None
 
@@ -189,18 +198,24 @@ class DataLogger:
         theta_ref_deg = turn_to_deg(theta_ref)
         omega_out_deg = turn_to_deg(output_vel)
 
-        axes[0].plot(time_data, theta_ref_deg, "--", label="θ_ref")
-        axes[0].plot(time_data, theta_out_deg, "-", label="θ_out")
-        axes[0].set_ylabel("θ [deg]")
+        axes[0].plot(time_data, theta_ref_deg, "--", label=r"$\theta_{\mathrm{ref}}$")
+        axes[0].plot(time_data, theta_out_deg, "-", label=r"$\theta_{\mathrm{out}}$")
+        axes[0].set_ylabel(r"$\theta$ [deg]")
         axes[0].legend(loc="upper right")
 
-        axes[1].plot(time_data, omega_out_deg, "-", label="ω_out")
-        axes[1].set_ylabel("ω [deg/s]")
+        axes[1].plot(
+            time_data,
+            omega_out_deg,
+            "-",
+            color="tab:green",
+            label=r"$\omega_{\mathrm{out}}$",
+        )
+        axes[1].set_ylabel(r"$\omega$ [deg/s]")
         axes[1].legend(loc="upper right")
 
-        axes[2].plot(time_data, tau_1, label="τ_1")
-        axes[2].plot(time_data, tau_2, label="τ_2")
-        axes[2].set_ylabel("Torque [Nm]")
+        axes[2].plot(time_data, tau_1, "-", color="tab:blue", label=r"$\tau_1$")
+        axes[2].plot(time_data, tau_2, "-", color="tab:red", label=r"$\tau_2$")
+        axes[2].set_ylabel(r"$\tau$ [Nm]")
         axes[2].set_xlabel("Time [s]")
         axes[2].legend(loc="upper right")
 
