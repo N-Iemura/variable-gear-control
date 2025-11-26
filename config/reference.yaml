@@ -1,9 +1,9 @@
-active_profile: ramp_step
+active_profile: step
 file_label: null
 
 step:
   initial_wait: 1.0
-  step_duration: 20.0
+  step_duration: 100.0
   output_amplitude: 0.2
   offset: 0.0
 
@@ -59,7 +59,7 @@ ramp_step:
 
 nstep:
   initial_wait: 1.0
-  values: [0.2, 0, -0.2, 0.0]
-  hold_duration: 3.0
+  values: [0.2, 0, 0.2, 0.0]
+  hold_duration: 4.0
   repeat: true
   wait_value: 0.0
