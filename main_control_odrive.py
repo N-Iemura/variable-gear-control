@@ -436,7 +436,8 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
 
     dob_cfg = controller_cfg.get("dob", {})
     cutoff_hz = float(dob_cfg.get("cutoff_hz", 20.0))
-    dob = DisturbanceObserver(inertia, damping, dt, cutoff_hz)
+    dob_use_damping = bool(dob_cfg.get("use_damping", True))
+    dob = DisturbanceObserver(inertia, damping, dt, cutoff_hz, use_damping=dob_use_damping)
 
     torque_limits = controller_cfg.get("torque_limits", {})
     rate_limits = controller_cfg.get("torque_rate_limits", {})

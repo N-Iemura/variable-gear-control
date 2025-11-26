@@ -7,12 +7,20 @@ from typing import Dict, Tuple
 class DisturbanceObserver:
     """Simple discrete-time disturbance observer for torque estimation."""
 
-    def __init__(self, inertia: float, damping: float, dt: float, cutoff_hz: float) -> None:
+    def __init__(
+        self,
+        inertia: float,
+        damping: float,
+        dt: float,
+        cutoff_hz: float,
+        use_damping: bool = True,
+    ) -> None:
         self.inertia = float(inertia)
         self.damping = float(damping)
         self.dt = float(dt)
         self.cutoff_hz = float(cutoff_hz)
         self.alpha = 1.0 - math.exp(-2.0 * math.pi * self.cutoff_hz * self.dt)
+        self.use_damping = bool(use_damping)
 
         self.prev_velocity = 0.0
         self.estimate = 0.0
@@ -27,7 +35,8 @@ class DisturbanceObserver:
         omega_dot = (omega - self.prev_velocity) / self.dt
         self.prev_velocity = omega
 
-        equivalent_torque = self.inertia * omega_dot + self.damping * omega
+        damping_term = self.damping * omega if self.use_damping else 0.0
+        equivalent_torque = self.inertia * omega_dot + damping_term
         raw_disturbance = equivalent_torque - torque_command
 
         self.estimate += self.alpha * (raw_disturbance - self.estimate)
@@ -39,5 +48,6 @@ class DisturbanceObserver:
             "raw_disturbance": raw_disturbance,
             "filtered_disturbance": self.estimate,
             "augmented_torque": augmented_torque,
+            "use_damping": self.use_damping,
         }
         return augmented_torque, diagnostics
