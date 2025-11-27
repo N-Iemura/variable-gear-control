@@ -31,7 +31,9 @@ _LOGGER = logging.getLogger(__name__)
 class AxisSignals:
     position: float
     velocity: float
-    torque: float
+    torque_command: float
+    current_iq: float
+    torque_measured: float
 
 
 class ODriveAxisHandle:
@@ -79,12 +81,23 @@ class ODriveAxisHandle:
 
     def read_signals(self) -> AxisSignals:
         position, velocity = self._resolve_position_velocity()
-        torque = 0.0
+        torque_cmd = 0.0
+        iq_measured = 0.0
         if self.is_motor:
             controller = getattr(self.axis, "controller", None)
             if controller is not None and hasattr(controller, "input_torque"):
-                torque = float(controller.input_torque)
-        return AxisSignals(position=position, velocity=velocity, torque=torque)
+                torque_cmd = float(controller.input_torque)
+            current_ctrl = getattr(getattr(self.axis, "motor", None), "current_control", None)
+            if current_ctrl is not None and hasattr(current_ctrl, "iq_measured"):
+                iq_measured = float(current_ctrl.iq_measured)
+        torque_measured = iq_measured * float(self.torque_constant or 0.0)
+        return AxisSignals(
+            position=position,
+            velocity=velocity,
+            torque_command=torque_cmd,
+            current_iq=iq_measured,
+            torque_measured=torque_measured,
+        )
 
     def command_torque(self, torque: float) -> None:
         if not self.is_motor:
@@ -203,7 +216,9 @@ class ODriveInterface:
             states[name] = AxisSignals(
                 position=signals.position - offset,
                 velocity=signals.velocity,
-                torque=signals.torque,
+                torque_command=signals.torque_command,
+                current_iq=signals.current_iq,
+                torque_measured=signals.torque_measured,
             )
         if self.output_axis is not None:
             signals = self.output_axis.read_signals()
@@ -211,7 +226,9 @@ class ODriveInterface:
             states["output"] = AxisSignals(
                 position=signals.position - offset,
                 velocity=signals.velocity,
-                torque=signals.torque,
+                torque_command=signals.torque_command,
+                current_iq=signals.current_iq,
+                torque_measured=signals.torque_measured,
             )
         return states
 

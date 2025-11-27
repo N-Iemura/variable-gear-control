@@ -31,13 +31,20 @@ class LogRecord:
     pos_1: float
     vel_1: float
     tau_1: float
+    iq_1: float
+    tau_meas_1: float
     pos_2: float
     vel_2: float
     tau_2: float
+    iq_2: float
+    tau_meas_2: float
     output_pos: float
     output_vel: float
     theta_ref: float
     theta_ctrl: float
+    tau_pid: float
+    tau_dob: float
+    dob_disturbance: float
     tau_out: float
     loop_dt: float = 0.0
 
@@ -59,13 +66,20 @@ class DataLogger:
         pos_1: float,
         vel_1: float,
         tau_1: float,
+        iq_1: float,
+        tau_meas_1: float,
         pos_2: float,
         vel_2: float,
         tau_2: float,
+        iq_2: float,
+        tau_meas_2: float,
         output_pos: float,
         output_vel: float,
         reference_position: float,
         reference_control: float,
+        tau_pid: float,
+        tau_dob: float,
+        dob_disturbance: float,
         tau_out: float,
         loop_dt: Optional[float] = None,
     ) -> None:
@@ -74,13 +88,20 @@ class DataLogger:
             pos_1=float(pos_1),
             vel_1=float(vel_1),
             tau_1=float(tau_1),
+            iq_1=float(iq_1),
+            tau_meas_1=float(tau_meas_1),
             pos_2=float(pos_2),
             vel_2=float(vel_2),
             tau_2=float(tau_2),
+            iq_2=float(iq_2),
+            tau_meas_2=float(tau_meas_2),
             output_pos=float(output_pos),
             output_vel=float(output_vel),
             theta_ref=float(reference_position),
             theta_ctrl=float(reference_control),
+            tau_pid=float(tau_pid),
+            tau_dob=float(tau_dob),
+            dob_disturbance=float(dob_disturbance),
             tau_out=float(tau_out),
             loop_dt=float(loop_dt) if loop_dt is not None else 0.0,
         )
@@ -136,13 +157,20 @@ class DataLogger:
                     "pos_1",
                     "vel_1",
                     "tau_1",
+                    "iq_1",
+                    "tau_meas_1",
                     "pos_2",
                     "vel_2",
                     "tau_2",
+                    "iq_2",
+                    "tau_meas_2",
                     "output_pos",
                     "output_vel",
                     "theta_ref",
                     "theta_ctrl",
+                    "tau_pid",
+                    "tau_dob",
+                    "dob_disturbance",
                     "tau_out",
                     "loop_dt",
                 ]
@@ -154,13 +182,20 @@ class DataLogger:
                         record.pos_1,
                         record.vel_1,
                         record.tau_1,
+                        record.iq_1,
+                        record.tau_meas_1,
                         record.pos_2,
                         record.vel_2,
                         record.tau_2,
+                        record.iq_2,
+                        record.tau_meas_2,
                         record.output_pos,
                         record.output_vel,
                         record.theta_ref,
                         record.theta_ctrl,
+                        record.tau_pid,
+                        record.tau_dob,
+                        record.dob_disturbance,
                         record.tau_out,
                         record.loop_dt,
                     ]
