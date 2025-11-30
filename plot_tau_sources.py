@@ -40,12 +40,13 @@ def _resolve(series: Dict[str, np.ndarray], names: Iterable[str]) -> Tuple[str, 
 
 def plot_tau_sources(csv_path: Path, save_path: Path | None = None, show: bool = False) -> Path:
     time, series = _load_csv(csv_path)
-    pid_name, tau_pid = _resolve(series, ("tau_pid", "theta_ctrl"))
-    dob_name, tau_dob = _resolve(series, ("tau_dob", "tau_out"))
+    # Prefer the explicit columns; fall back for older logs but label as the canonical names.
+    _, tau_pid = _resolve(series, ("tau_pid", "theta_ctrl"))
+    _, tau_dob = _resolve(series, ("tau_dob", "tau_out"))
 
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(time, tau_pid, label=f"{pid_name} (controller output)", color="tab:blue")
-    ax.plot(time, tau_dob, label=f"{dob_name} (after DOB)", color="tab:orange")
+    ax.plot(time, tau_pid, label="tau_pid (controller output)", color="tab:blue")
+    ax.plot(time, tau_dob, label="tau_dob (after DOB)", color="tab:orange")
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Torque [Nm]")
     ax.set_title("Torque contributions")

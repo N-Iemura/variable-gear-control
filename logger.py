@@ -56,9 +56,14 @@ class DataLogger:
     controller_config: Dict[str, object] = field(default_factory=dict)
     reference: object = None
     records: List[LogRecord] = field(default_factory=list)
+    torque_constants: Dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.filename_decimals = int(self.config.get("filename_decimals", 4))
+        # Allow torque constants to be provided either via logger config or injection
+        torque_cfg = self.config.get("torque_constants", {})
+        if isinstance(torque_cfg, dict):
+            self.torque_constants = {**torque_cfg, **self.torque_constants}
 
     def log(
         self,
@@ -225,6 +230,8 @@ class DataLogger:
         output_pos = np.asarray([rec.output_pos for rec in self.records], dtype=float)
         output_vel = np.asarray([rec.output_vel for rec in self.records], dtype=float)
         theta_ref = np.asarray([rec.theta_ref for rec in self.records], dtype=float)
+        iq_1 = np.asarray([rec.iq_1 for rec in self.records], dtype=float)
+        iq_2 = np.asarray([rec.iq_2 for rec in self.records], dtype=float)
 
         fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
 
@@ -232,6 +239,11 @@ class DataLogger:
         theta_out_deg = turn_to_deg(output_pos)
         theta_ref_deg = turn_to_deg(theta_ref)
         omega_out_deg = turn_to_deg(output_vel)
+
+        kt1 = float(self.torque_constants.get("motor1", 0.0))
+        kt2 = float(self.torque_constants.get("motor2", 0.0))
+        tau_from_iq1 = iq_1 * kt1
+        tau_from_iq2 = iq_2 * kt2
 
         axes[0].plot(time_data, theta_ref_deg, "--", label=r"$\theta_{\mathrm{ref}}$")
         axes[0].plot(time_data, theta_out_deg, "-", label=r"$\theta_{\mathrm{out}}$")
@@ -250,6 +262,22 @@ class DataLogger:
 
         axes[2].plot(time_data, tau_1, "-", color="tab:blue", label=r"$\tau_1$")
         axes[2].plot(time_data, tau_2, "-", color="tab:red", label=r"$\tau_2$")
+        axes[2].plot(
+            time_data,
+            tau_from_iq1,
+            "--",
+            color="tab:blue",
+            alpha=0.8,
+            label=r"$\tau_{iq,1}$",
+        )
+        axes[2].plot(
+            time_data,
+            tau_from_iq2,
+            "--",
+            color="tab:red",
+            alpha=0.8,
+            label=r"$\tau_{iq,2}$",
+        )
         axes[2].set_ylabel(r"$\tau$ [Nm]")
         axes[2].set_xlabel("Time [s]")
         axes[2].legend(loc="upper right")

@@ -107,6 +107,7 @@ def run_identification(config_dir: Path, log_level: str) -> None:
         base_path=config_dir.parent,
         controller_config=controller_cfg,
         reference=None,
+        torque_constants=hardware_cfg.get("odrive", {}).get("torque_constants", {}),
     )
 
     odrive_iface.connect(calibrate=False)

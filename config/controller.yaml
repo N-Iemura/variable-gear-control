@@ -9,7 +9,7 @@ plant:
 
 outer_pid:
   kp: 20.0
-  ki: 10.0
+  ki: 0.0
   kd: 2.0
   max_output: 200.0
 

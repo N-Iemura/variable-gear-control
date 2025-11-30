@@ -87,9 +87,30 @@ class ODriveAxisHandle:
             controller = getattr(self.axis, "controller", None)
             if controller is not None and hasattr(controller, "input_torque"):
                 torque_cmd = float(controller.input_torque)
-            current_ctrl = getattr(getattr(self.axis, "motor", None), "current_control", None)
-            if current_ctrl is not None and hasattr(current_ctrl, "iq_measured"):
-                iq_measured = float(current_ctrl.iq_measured)
+            motor = getattr(self.axis, "motor", None)
+            if motor is not None:
+                # ODrive exposes Iq in different places/casings across firmware revisions.
+                iq_paths = [
+                    ("current_control", "iq_measured"),
+                    ("current_control", "Iq_measured"),
+                    ("current_control", "Iq_setpoint"),
+                    ("foc", "Iq_measured"),
+                    ("foc", "Iq_setpoint"),
+                    ("Iq_measured",),
+                    ("Iq_setpoint",),
+                ]
+                for path in iq_paths:
+                    obj = motor
+                    for attr in path:
+                        obj = getattr(obj, attr, None)
+                        if obj is None:
+                            break
+                    else:
+                        try:
+                            iq_measured = float(obj)
+                            break
+                        except (TypeError, ValueError):
+                            continue
         torque_measured = iq_measured * float(self.torque_constant or 0.0)
         return AxisSignals(
             position=position,

@@ -472,6 +472,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         base_path=config_dir.parent,
         controller_config=controller_cfg,
         reference=reference,
+        torque_constants=hardware_cfg.get("odrive", {}).get("torque_constants", {}),
     )
 
     odrive_iface = ODriveInterface(hardware)
