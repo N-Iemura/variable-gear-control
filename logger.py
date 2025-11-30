@@ -47,6 +47,9 @@ class LogRecord:
     dob_disturbance: float
     tau_out: float
     loop_dt: float = 0.0
+    diag_read: float = 0.0
+    diag_ctrl: float = 0.0
+    diag_log: float = 0.0
 
 
 @dataclass
@@ -87,6 +90,9 @@ class DataLogger:
         dob_disturbance: float,
         tau_out: float,
         loop_dt: Optional[float] = None,
+        diag_read: float = 0.0,
+        diag_ctrl: float = 0.0,
+        diag_log: float = 0.0,
     ) -> None:
         record = LogRecord(
             time=time_stamp,
@@ -109,6 +115,9 @@ class DataLogger:
             dob_disturbance=float(dob_disturbance),
             tau_out=float(tau_out),
             loop_dt=float(loop_dt) if loop_dt is not None else 0.0,
+            diag_read=float(diag_read),
+            diag_ctrl=float(diag_ctrl),
+            diag_log=float(diag_log),
         )
         self.records.append(record)
 
@@ -178,6 +187,9 @@ class DataLogger:
                     "dob_disturbance",
                     "tau_out",
                     "loop_dt",
+                    "diag_read",
+                    "diag_ctrl",
+                    "diag_log",
                 ]
             )
             for record in self.records:
@@ -203,6 +215,9 @@ class DataLogger:
                         record.dob_disturbance,
                         record.tau_out,
                         record.loop_dt,
+                        record.diag_read,
+                        record.diag_ctrl,
+                        record.diag_log,
                     ]
                 )
         figure_path = self._save_plot(csv_path, command_values)

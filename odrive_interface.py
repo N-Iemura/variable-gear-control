@@ -79,11 +79,11 @@ class ODriveAxisHandle:
             time.sleep(0.1)
         raise TimeoutError("Axis did not enter IDLE state within timeout.")
 
-    def read_signals(self) -> AxisSignals:
+    def read_signals(self, fast: bool = False) -> AxisSignals:
         position, velocity = self._resolve_position_velocity()
         torque_cmd = 0.0
         iq_measured = 0.0
-        if self.is_motor:
+        if self.is_motor and not fast:
             controller = getattr(self.axis, "controller", None)
             if controller is not None and hasattr(controller, "input_torque"):
                 torque_cmd = float(controller.input_torque)
@@ -229,10 +229,10 @@ class ODriveInterface:
             self.position_offsets["output"] = signals.position
         _LOGGER.info("Position offsets captured: %s", ", ".join(f"{k}={v:.6f}" for k, v in self.position_offsets.items()))
 
-    def read_states(self) -> Dict[str, AxisSignals]:
+    def read_states(self, fast: bool = False) -> Dict[str, AxisSignals]:
         states: Dict[str, AxisSignals] = {}
         for name, handle in self.devices.items():
-            signals = handle.read_signals()
+            signals = handle.read_signals(fast=fast)
             offset = self.position_offsets.get(name, 0.0)
             states[name] = AxisSignals(
                 position=signals.position - offset,
@@ -242,7 +242,7 @@ class ODriveInterface:
                 torque_measured=signals.torque_measured,
             )
         if self.output_axis is not None:
-            signals = self.output_axis.read_signals()
+            signals = self.output_axis.read_signals(fast=fast)
             offset = self.position_offsets.get("output", 0.0)
             states["output"] = AxisSignals(
                 position=signals.position - offset,

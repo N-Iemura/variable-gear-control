@@ -507,7 +507,6 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     _LOGGER.info("Control loop started (dt=%.6f s)", dt)
 
     start_time = time.time()
-    loop_time = start_time
     running = True
     prev_loop_time = start_time
     loop_intervals: list[float] = []
@@ -521,7 +520,9 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
 
             command = reference.sample(elapsed)
 
-            states = odrive_iface.read_states()
+            t_read_start = time.perf_counter()
+            states = odrive_iface.read_states(fast=True)
+            t_read_end = time.perf_counter()
             output_state = states.get("output", states["motor1"])
 
             feedback = PositionFeedback(
@@ -541,6 +542,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
 
             tau_alloc, alloc_diag = allocator.allocate(tau_aug, weights, secondary_gain)
             odrive_iface.command_torques(float(tau_alloc[0]), float(tau_alloc[1]))
+            t_ctrl_end = time.perf_counter()
 
             motor1_state = states["motor1"]
             motor2_state = states["motor2"]
@@ -567,17 +569,12 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 dob_disturbance=dob_diag.get("filtered_disturbance", 0.0),
                 tau_out=tau_aug,
                 loop_dt=loop_dt_actual,
+                diag_read=t_read_end - t_read_start,
+                diag_ctrl=t_ctrl_end - t_read_end,
+                diag_log=time.perf_counter() - t_ctrl_end,
             )
             loop_intervals.append(loop_dt_actual)
             prev_loop_time = now
-
-            # Maintain timing
-            loop_time += dt
-            sleep_time = loop_time - time.time()
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-            else:
-                loop_time = time.time()
     except KeyboardInterrupt:
         _LOGGER.info("Keyboard interrupt received, stopping control loop.")
         running = False
