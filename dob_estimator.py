@@ -23,12 +23,12 @@ class DisturbanceObserver:
         self.use_damping = bool(use_damping)
 
         self.prev_velocity = 0.0
-        self.prev_applied_torque = 0.0
+        # self.prev_applied_torque = 0.0
         self.estimate = 0.0
 
     def reset(self) -> None:
         self.prev_velocity = 0.0
-        self.prev_applied_torque = 0.0
+        # self.prev_applied_torque = 0.0
         self.estimate = 0.0
 
     def update(self, velocity: float, torque_command: float) -> Tuple[float, Dict[str, float]]:
@@ -36,17 +36,18 @@ class DisturbanceObserver:
         torque_command = float(torque_command)
         omega_dot = (omega - self.prev_velocity) / self.dt
         self.prev_velocity = omega
-
+        
         damping_term = self.damping * omega if self.use_damping else 0.0
         equivalent_torque = self.inertia * omega_dot + damping_term
+        raw_disturbance = equivalent_torque - torque_command
 
         # Disturbance is the torque required to explain the measured acceleration
         # minus the torque we actually applied on the previous cycle.
-        raw_disturbance = equivalent_torque - self.prev_applied_torque
+        # raw_disturbance = equivalent_torque - self.prev_applied_torque
 
         self.estimate += self.alpha * (raw_disturbance - self.estimate)
         augmented_torque = torque_command - self.estimate
-        self.prev_applied_torque = augmented_torque
+        # self.prev_applied_torque = augmented_torque
 
         diagnostics = {
             "omega_dot": omega_dot,
