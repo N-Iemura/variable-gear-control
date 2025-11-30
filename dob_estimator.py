@@ -39,14 +39,16 @@ class DisturbanceObserver:
         
         damping_term = self.damping * omega if self.use_damping else 0.0
         equivalent_torque = self.inertia * omega_dot + damping_term
-        raw_disturbance = equivalent_torque - torque_command
+        # When disturbances act as a torque loss (actual torque = command - disturbance)
+        # we estimate how much torque was missing from the command.
+        raw_disturbance = torque_command - equivalent_torque
 
         # Disturbance is the torque required to explain the measured acceleration
         # minus the torque we actually applied on the previous cycle.
         # raw_disturbance = equivalent_torque - self.prev_applied_torque
 
         self.estimate += self.alpha * (raw_disturbance - self.estimate)
-        augmented_torque = torque_command - self.estimate
+        augmented_torque = torque_command + self.estimate
         # self.prev_applied_torque = augmented_torque
 
         diagnostics = {
