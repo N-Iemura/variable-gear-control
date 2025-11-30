@@ -1,10 +1,11 @@
+command_type: position  # position | velocity
 active_profile: step
 file_label: null
 
 step:
   initial_wait: 1.0
   step_duration: 100.0
-  output_amplitude: 0.2
+  output_amplitude: 0.1
   offset: 0.0
 
 sine:

@@ -7,7 +7,12 @@ from typing import Dict, Tuple
 
 @dataclass
 class PositionCommand:
-    """Reference signals for the outer-loop position controller."""
+    """Reference signals for the outer-loop controller.
+
+    The fields can represent either a position trajectory (position/velocity/acc)
+    or a velocity trajectory (velocity/acceleration/jerk) depending on the active
+    command type.
+    """
 
     position: float
     velocity: float = 0.0
@@ -116,6 +121,101 @@ class PositionController:
         self.derivative_state += self.alpha * (raw - self.derivative_state)
         self.prev_feedback_vel = feedback_velocity
         return raw
+
+    def _saturate(self, value: float) -> float:
+        if not math.isfinite(self.max_output):
+            return value
+        return max(-self.max_output, min(self.max_output, value))
+
+
+class VelocityController:
+    """PID + feedforward outer-loop controller for velocity tracking."""
+
+    def __init__(
+        self,
+        gains: Dict[str, float],
+        plant_inertia: float,
+        plant_damping: float,
+        dt: float,
+        derivative_mode: str = "error",
+        derivative_filter_alpha: float = 1.0,
+    ) -> None:
+        self.kp = float(gains.get("kp", 0.0))
+        self.ki = float(gains.get("ki", 0.0))
+        self.kd = float(gains.get("kd", 0.0))
+        self.max_output = abs(float(gains.get("max_output", math.inf)))
+        self.inertia = float(plant_inertia)
+        self.damping = float(plant_damping)
+        self.dt = float(dt)
+        self.derivative_mode = derivative_mode.lower()
+        if self.derivative_mode not in {"error", "measurement"}:
+            raise ValueError("derivative_mode must be 'error' or 'measurement'")
+        self.alpha = max(0.0, min(1.0, float(derivative_filter_alpha)))
+
+        self.integral = 0.0
+        self.integral_limit = (
+            self.max_output / max(abs(self.ki), 1e-9) if self.ki != 0.0 else math.inf
+        )
+        self.prev_error = 0.0
+        self.prev_feedback_vel = 0.0
+        self.derivative_state = 0.0
+
+    def reset(self) -> None:
+        self.integral = 0.0
+        self.prev_error = 0.0
+        self.prev_feedback_vel = 0.0
+        self.derivative_state = 0.0
+
+    def update(
+        self, command: PositionCommand, feedback: PositionFeedback
+    ) -> Tuple[float, Dict[str, float]]:
+        error = float(command.velocity - feedback.velocity)
+        measured_acc = (feedback.velocity - self.prev_feedback_vel) / self.dt
+
+        if self.derivative_mode == "measurement":
+            raw = float(command.acceleration) - measured_acc
+        else:
+            raw = (error - self.prev_error) / self.dt
+            self.prev_error = error
+
+        self.derivative_state += self.alpha * (raw - self.derivative_state)
+        self.prev_feedback_vel = feedback.velocity
+
+        self.integral += error * self.dt
+        if self.integral_limit < math.inf:
+            self.integral = max(-self.integral_limit, min(self.integral_limit, self.integral))
+
+        feedforward = self.inertia * float(command.acceleration) + self.damping * float(
+            command.velocity
+        )
+
+        unsaturated = (
+            self.kp * error
+            + self.ki * self.integral
+            + self.kd * self.derivative_state
+            + feedforward
+        )
+        saturated = self._saturate(unsaturated)
+
+        if self.ki != 0.0 and saturated != unsaturated:
+            excess = saturated - unsaturated
+            self.integral += excess / self.ki
+            if self.integral_limit < math.inf:
+                self.integral = max(
+                    -self.integral_limit, min(self.integral_limit, self.integral)
+                )
+
+        diagnostics = {
+            "error": error,
+            "error_rate": raw,
+            "integral": self.integral,
+            "derivative": self.derivative_state,
+            "feedforward": feedforward,
+            "unsaturated_output": unsaturated,
+            "output": saturated,
+            "measured_acc": measured_acc,
+        }
+        return saturated, diagnostics
 
     def _saturate(self, value: float) -> float:
         if not math.isfinite(self.max_output):

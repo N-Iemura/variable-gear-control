@@ -41,6 +41,7 @@ class LogRecord:
     output_pos: float
     output_vel: float
     theta_ref: float
+    omega_ref: float
     theta_ctrl: float
     tau_pid: float
     tau_dob: float
@@ -67,6 +68,13 @@ class DataLogger:
         torque_cfg = self.config.get("torque_constants", {})
         if isinstance(torque_cfg, dict):
             self.torque_constants = {**torque_cfg, **self.torque_constants}
+        ref_cmd_type = getattr(self.reference, "command_type", None)
+        if ref_cmd_type is None and hasattr(self.reference, "get_command_type"):
+            try:
+                ref_cmd_type = self.reference.get_command_type()
+            except Exception:
+                ref_cmd_type = None
+        self.command_type = str(ref_cmd_type).lower() if ref_cmd_type else "position"
 
     def log(
         self,
@@ -84,11 +92,12 @@ class DataLogger:
         output_pos: float,
         output_vel: float,
         reference_position: float,
-        reference_control: float,
-        tau_pid: float,
-        tau_dob: float,
-        dob_disturbance: float,
-        tau_out: float,
+        reference_velocity: float = 0.0,
+        reference_control: float = 0.0,
+        tau_pid: float = 0.0,
+        tau_dob: float = 0.0,
+        dob_disturbance: float = 0.0,
+        tau_out: float = 0.0,
         loop_dt: Optional[float] = None,
         diag_read: float = 0.0,
         diag_ctrl: float = 0.0,
@@ -109,6 +118,7 @@ class DataLogger:
             output_pos=float(output_pos),
             output_vel=float(output_vel),
             theta_ref=float(reference_position),
+            omega_ref=float(reference_velocity),
             theta_ctrl=float(reference_control),
             tau_pid=float(tau_pid),
             tau_dob=float(tau_dob),
@@ -140,17 +150,24 @@ class DataLogger:
         metadata = metadata or {}
 
         theta_ref_series = [record.theta_ref for record in self.records]
+        omega_ref_series = [record.omega_ref for record in self.records]
         command_override = self.config.get("filename_command_values")
-        if self.reference and theta_ref_series:
+        if self.command_type == "velocity":
+            base_commands = omega_ref_series
+            theta_for_values = omega_ref_series
+        else:
+            base_commands = theta_ref_series
+            theta_for_values = theta_ref_series
+        if self.reference and base_commands:
             command_values = self.reference.resolve_command_values(
-                theta_ref_series,
-                theta_ref_series,
+                base_commands,
+                theta_for_values,
                 override=command_override,
                 decimals=self.filename_decimals,
             )
-        elif theta_ref_series:
+        elif base_commands:
             command_values = np.unique(
-                np.round(np.asarray(theta_ref_series, dtype=float), self.filename_decimals)
+                np.round(np.asarray(base_commands, dtype=float), self.filename_decimals)
             )
         else:
             command_values = np.array([0.0], dtype=float)
@@ -181,6 +198,7 @@ class DataLogger:
                     "output_pos",
                     "output_vel",
                     "theta_ref",
+                    "omega_ref",
                     "theta_ctrl",
                     "tau_pid",
                     "tau_dob",
@@ -209,6 +227,7 @@ class DataLogger:
                         record.output_pos,
                         record.output_vel,
                         record.theta_ref,
+                        record.omega_ref,
                         record.theta_ctrl,
                         record.tau_pid,
                         record.tau_dob,
@@ -245,6 +264,7 @@ class DataLogger:
         output_pos = np.asarray([rec.output_pos for rec in self.records], dtype=float)
         output_vel = np.asarray([rec.output_vel for rec in self.records], dtype=float)
         theta_ref = np.asarray([rec.theta_ref for rec in self.records], dtype=float)
+        omega_ref = np.asarray([rec.omega_ref for rec in self.records], dtype=float)
         iq_1 = np.asarray([rec.iq_1 for rec in self.records], dtype=float)
         iq_2 = np.asarray([rec.iq_2 for rec in self.records], dtype=float)
 
@@ -253,6 +273,7 @@ class DataLogger:
         turn_to_deg = lambda arr: np.asarray(arr, dtype=float) * 360.0
         theta_out_deg = turn_to_deg(output_pos)
         theta_ref_deg = turn_to_deg(theta_ref)
+        omega_ref_deg = turn_to_deg(omega_ref)
         omega_out_deg = turn_to_deg(output_vel)
 
         kt1 = float(self.torque_constants.get("motor1", 0.0))
@@ -260,20 +281,30 @@ class DataLogger:
         tau_from_iq1 = iq_1 * kt1
         tau_from_iq2 = iq_2 * kt2
 
-        axes[0].plot(time_data, theta_ref_deg, "--", label=r"$\theta_{\mathrm{ref}}$")
-        axes[0].plot(time_data, theta_out_deg, "-", label=r"$\theta_{\mathrm{out}}$")
-        axes[0].set_ylabel(r"$\theta$ [deg]")
-        axes[0].legend(loc="upper right")
+        if self.command_type == "velocity":
+            axes[0].plot(time_data, omega_ref_deg, "--", label=r"$\omega_{\mathrm{ref}}$")
+            axes[0].plot(time_data, omega_out_deg, "-", label=r"$\omega_{\mathrm{out}}$")
+            axes[0].set_ylabel(r"$\omega$ [deg/s]")
+            axes[0].legend(loc="upper right")
 
-        axes[1].plot(
-            time_data,
-            omega_out_deg,
-            "-",
-            color="tab:green",
-            label=r"$\omega_{\mathrm{out}}$",
-        )
-        axes[1].set_ylabel(r"$\omega$ [deg/s]")
-        axes[1].legend(loc="upper right")
+            axes[1].plot(time_data, theta_out_deg, "-", label=r"$\theta_{\mathrm{out}}$")
+            axes[1].set_ylabel(r"$\theta$ [deg]")
+            axes[1].legend(loc="upper right")
+        else:
+            axes[0].plot(time_data, theta_ref_deg, "--", label=r"$\theta_{\mathrm{ref}}$")
+            axes[0].plot(time_data, theta_out_deg, "-", label=r"$\theta_{\mathrm{out}}$")
+            axes[0].set_ylabel(r"$\theta$ [deg]")
+            axes[0].legend(loc="upper right")
+
+            axes[1].plot(
+                time_data,
+                omega_out_deg,
+                "-",
+                color="tab:green",
+                label=r"$\omega_{\mathrm{out}}$",
+            )
+            axes[1].set_ylabel(r"$\omega$ [deg/s]")
+            axes[1].legend(loc="upper right")
 
         axes[2].plot(time_data, tau_1, "-", color="tab:blue", label=r"$\tau_1$")
         axes[2].plot(time_data, tau_2, "-", color="tab:red", label=r"$\tau_2$")
@@ -338,6 +369,7 @@ class DataLogger:
             [
                 ("Profile", profile_name),
                 ("ProfileLabel", profile_label),
+                ("CommandType", self.command_type),
                 ("CommandValues", command_values_text),
                 ("Settings", profile_settings),
                 ("ControlMode", control_mode),

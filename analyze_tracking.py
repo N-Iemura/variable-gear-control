@@ -17,9 +17,19 @@ except Exception:  # pragma: no cover - optional dependency
     yaml = None
 
 
-def _load_csv(path: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+def _load_csv(path: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray], Dict[str, str]]:
+    metadata: Dict[str, str] = {}
     with path.open("r") as f:
-        rows = [line for line in f if line.strip() and not line.startswith("#")]
+        rows = []
+        for line in f:
+            if not line.strip():
+                continue
+            if line.startswith("#"):
+                parts = line[1:].split("=", 1)
+                if len(parts) == 2:
+                    metadata[parts[0].strip()] = parts[1].strip()
+                continue
+            rows.append(line)
     if not rows:
         raise ValueError(f"{path} has no data rows.")
     reader = csv.DictReader(rows)
@@ -33,7 +43,7 @@ def _load_csv(path: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
     time = series.get("time")
     if time is None:
         raise KeyError("CSV is missing required column 'time'.")
-    return time, series
+    return time, series, metadata
 
 
 def _load_limits(config_path: Optional[Path]) -> Dict[str, float]:
@@ -51,10 +61,22 @@ def _load_limits(config_path: Optional[Path]) -> Dict[str, float]:
 
 
 def analyze(csv_path: Path, config_path: Optional[Path] = None, show: bool = False) -> Path:
-    time, series = _load_csv(csv_path)
-    theta_ref = series["theta_ref"]
-    theta_out = series.get("output_pos", series.get("pos_1"))
-    error = theta_ref - theta_out
+    time, series, metadata = _load_csv(csv_path)
+    command_type = metadata.get("CommandType", "position").lower()
+    if command_type not in {"position", "velocity"}:
+        command_type = "position"
+    if command_type == "velocity" and "omega_ref" in series:
+        ref = series["omega_ref"]
+        feedback = series.get("output_vel", series.get("vel_1"))
+        error = ref - feedback
+        ref_label = "Velocity [turn/s]"
+        error_label = "Velocity error [turn/s]"
+    else:
+        ref = series["theta_ref"]
+        feedback = series.get("output_pos", series.get("pos_1"))
+        error = ref - feedback
+        ref_label = "Position [turn]"
+        error_label = "Position error [turn]"
     tau_pid = series.get("tau_pid", series.get("theta_ctrl"))
     tau_dob = series.get("tau_dob", series.get("tau_out"))
     tau_out = series.get("tau_out", tau_dob)
@@ -68,15 +90,15 @@ def analyze(csv_path: Path, config_path: Optional[Path] = None, show: bool = Fal
     fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
 
     # Tracking
-    axes[0].plot(time, theta_ref, "--", label="theta_ref")
-    axes[0].plot(time, theta_out, "-", label="theta_out")
-    axes[0].set_ylabel("Position [turn]")
+    axes[0].plot(time, ref, "--", label="command")
+    axes[0].plot(time, feedback, "-", label="feedback")
+    axes[0].set_ylabel(ref_label)
     axes[0].legend(loc="best")
     axes[0].grid(True, alpha=0.3)
     axes[0].set_title("Tracking (error shown below)")
     ax_err = axes[0].twinx()
     ax_err.plot(time, error, color="tab:red", alpha=0.4, label="error")
-    ax_err.set_ylabel("Error [turn]", color="tab:red")
+    ax_err.set_ylabel(error_label, color="tab:red")
     ax_err.tick_params(axis="y", labelcolor="tab:red")
 
     # Torque time series with limits
@@ -99,7 +121,7 @@ def analyze(csv_path: Path, config_path: Optional[Path] = None, show: bool = Fal
 
     # Scatter: error vs tau_pid (slope ≈ kp if Ki=0)
     axes[2].scatter(error, tau_pid, s=4, alpha=0.5, label="tau_pid vs error")
-    axes[2].set_xlabel("Position error [turn]")
+    axes[2].set_xlabel(error_label)
     axes[2].set_ylabel("tau_pid [Nm]")
     axes[2].grid(True, alpha=0.3)
     axes[2].legend(loc="best")

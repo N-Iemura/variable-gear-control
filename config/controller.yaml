@@ -1,5 +1,6 @@
 control_frequency_hz: 200
 sample_time_s: 0.005
+command_type: position  # position | velocity
 
 plant:
   inertia: 0.009967215896643318
@@ -8,10 +9,16 @@ plant:
   motor_output_gains: [-20.0, 12.26993865]
 
 outer_pid:
-  kp: 20.0
+  kp: 30.00
   ki: 0.0
-  kd: 2.0
-  max_output: 200.0
+  kd: 10.0
+  max_output: 50.0
+
+velocity_pid:
+  kp: 35.00
+  ki: 10.0
+  kd: 10.0
+  max_output: 50.0
 
 per_motor_pid:
   enable_outer_loop: true
@@ -34,8 +41,8 @@ assist_manager:
   release_start_ratio: 0.5
   release_full_ratio: 0.9
   torque_thresholds:
-    activate: 0.10
-    deactivate: 0.10
+    activate: 0.6
+    deactivate: 0.5
   weighting:
     hold:
       motor1: 1.0
@@ -73,7 +80,10 @@ sign_enforcement:
   tolerance: 1.0e-3
 
 dob:
-  cutoff_hz: 20.0
+  enabled: true
+  torque_input_mode: applied  # command | applied
+  applied_sign: 1.0           # appliedが不安定なら -1.0 で符号補正
+  cutoff_hz: 2.0
   use_damping: false
 
 identification:

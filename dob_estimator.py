@@ -14,6 +14,7 @@ class DisturbanceObserver:
         dt: float,
         cutoff_hz: float,
         use_damping: bool = True,
+        torque_input_mode: str = "command",
     ) -> None:
         self.inertia = float(inertia)
         self.damping = float(damping)
@@ -21,6 +22,7 @@ class DisturbanceObserver:
         self.cutoff_hz = float(cutoff_hz)
         self.alpha = 1.0 - math.exp(-2.0 * math.pi * self.cutoff_hz * self.dt)
         self.use_damping = bool(use_damping)
+        self.torque_input_mode = str(torque_input_mode)
 
         self.prev_velocity = 0.0
         # self.prev_applied_torque = 0.0
@@ -31,25 +33,31 @@ class DisturbanceObserver:
         # self.prev_applied_torque = 0.0
         self.estimate = 0.0
 
-    def update(self, velocity: float, torque_command: float) -> Tuple[float, Dict[str, float]]:
+    def update(
+        self, velocity: float, torque_command: float, torque_applied: float | None = None
+    ) -> Tuple[float, Dict[str, float]]:
         omega = float(velocity)
         torque_command = float(torque_command)
         omega_dot = (omega - self.prev_velocity) / self.dt
         self.prev_velocity = omega
-        
+
         damping_term = self.damping * omega if self.use_damping else 0.0
         equivalent_torque = self.inertia * omega_dot + damping_term
-        # When disturbances act as a torque loss (actual torque = command - disturbance)
-        # we estimate how much torque was missing from the command.
-        raw_disturbance = torque_command - equivalent_torque
 
-        # Disturbance is the torque required to explain the measured acceleration
-        # minus the torque we actually applied on the previous cycle.
-        # raw_disturbance = equivalent_torque - self.prev_applied_torque
+        # raw_disturbanceは「どれだけトルクが足りなかったか」を推定する。
+        # torque_input は「実際に入れた（前周期の）トルク」が取れればそれを使い、
+        # 無ければ当周期コマンドを使う。
+        if self.torque_input_mode == "applied" and torque_applied is not None:
+            torque_input = float(torque_applied)
+        else:
+            torque_input = torque_command
+
+        raw_disturbance = torque_input - equivalent_torque
 
         self.estimate += self.alpha * (raw_disturbance - self.estimate)
+
+        # 新たに出すコマンドは常に「目標トルク = torque_command」基準で補償を足す。
         augmented_torque = torque_command + self.estimate
-        # self.prev_applied_torque = augmented_torque
 
         diagnostics = {
             "omega_dot": omega_dot,
@@ -58,5 +66,7 @@ class DisturbanceObserver:
             "filtered_disturbance": self.estimate,
             "augmented_torque": augmented_torque,
             "use_damping": self.use_damping,
+            "torque_input_mode": self.torque_input_mode,
+            "torque_input": torque_input,
         }
         return augmented_torque, diagnostics

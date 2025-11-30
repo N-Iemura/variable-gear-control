@@ -142,18 +142,26 @@ def run_identification(config_dir: Path, log_level: str) -> None:
             output_state = states.get("output", motor1_state)
 
             data_logger.log(
-                elapsed,
-                motor1_state.position,
-                motor1_state.velocity,
-                tau_cmd[0],
-                motor2_state.position,
-                motor2_state.velocity,
-                tau_cmd[1],
-                output_state.position,
-                output_state.velocity,
-                0.0,
-                tau_out_cmd,
-                tau_out_cmd,
+                time_stamp=elapsed,
+                pos_1=motor1_state.position,
+                vel_1=motor1_state.velocity,
+                tau_1=tau_cmd[0],
+                iq_1=motor1_state.current_iq,
+                tau_meas_1=motor1_state.torque_measured,
+                pos_2=motor2_state.position,
+                vel_2=motor2_state.velocity,
+                tau_2=tau_cmd[1],
+                iq_2=motor2_state.current_iq,
+                tau_meas_2=motor2_state.torque_measured,
+                output_pos=output_state.position,
+                output_vel=output_state.velocity,
+                reference_position=0.0,
+                reference_velocity=0.0,
+                reference_control=tau_out_cmd,
+                tau_pid=tau_out_cmd,
+                tau_dob=tau_out_cmd,
+                dob_disturbance=0.0,
+                tau_out=tau_out_cmd,
             )
 
             if done and not completed:

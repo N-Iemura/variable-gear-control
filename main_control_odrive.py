@@ -5,6 +5,7 @@ import logging
 import math
 import sys
 import time
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
@@ -16,7 +17,12 @@ from assist_manager import AssistManager
 from dob_estimator import DisturbanceObserver
 from logger import DataLogger
 from odrive_interface import ODriveInterface
-from position_controller import PositionCommand, PositionController, PositionFeedback
+from position_controller import (
+    PositionCommand,
+    PositionController,
+    PositionFeedback,
+    VelocityController,
+)
 from torque_distribution import TorqueAllocator
 
 
@@ -33,6 +39,9 @@ class ReferenceGenerator:
     config: Dict[str, object]
 
     def __post_init__(self) -> None:
+        self.command_type = str(self.config.get("command_type", "position")).lower()
+        if self.command_type not in {"position", "velocity"}:
+            raise ValueError("command_type must be 'position' or 'velocity'")
         self.profile = str(self.config.get("active_profile", "step"))
         self.profiles = {
             key: value for key, value in self.config.items() if isinstance(value, dict)
@@ -43,25 +52,30 @@ class ReferenceGenerator:
     def sample(self, elapsed: float) -> PositionCommand:
         profile_cfg = self.profiles[self.profile]
         if self.profile == "step":
-            return self._step(profile_cfg, elapsed)
-        if self.profile == "sine":
-            return self._sine(profile_cfg, elapsed)
-        if self.profile == "chirp":
-            return self._chirp(profile_cfg, elapsed)
-        if self.profile == "ramp":
-            return self._ramp(profile_cfg, elapsed)
-        if self.profile == "ramp_b":
-            return self._ramp_b(profile_cfg, elapsed)
-        if self.profile == "ramp_step":
-            return self._ramp_step(profile_cfg, elapsed)
-        if self.profile == "pulse":
-            return self._pulse(profile_cfg, elapsed)
-        if self.profile == "nstep":
-            return self._nstep(profile_cfg, elapsed)
-        raise KeyError(f"Unsupported profile: {self.profile}")
+            base = self._step(profile_cfg, elapsed)
+        elif self.profile == "sine":
+            base = self._sine(profile_cfg, elapsed)
+        elif self.profile == "chirp":
+            base = self._chirp(profile_cfg, elapsed)
+        elif self.profile == "ramp":
+            base = self._ramp(profile_cfg, elapsed)
+        elif self.profile == "ramp_b":
+            base = self._ramp_b(profile_cfg, elapsed)
+        elif self.profile == "ramp_step":
+            base = self._ramp_step(profile_cfg, elapsed)
+        elif self.profile == "pulse":
+            base = self._pulse(profile_cfg, elapsed)
+        elif self.profile == "nstep":
+            base = self._nstep(profile_cfg, elapsed)
+        else:
+            raise KeyError(f"Unsupported profile: {self.profile}")
+        return self._map_command(base)
 
     def get_active_profile_name(self) -> str:
         return self.profile
+
+    def get_command_type(self) -> str:
+        return self.command_type
 
     def get_profile_label(self) -> str:
         label = self.config.get("file_label")
@@ -75,6 +89,17 @@ class ReferenceGenerator:
             return "profile"
         safe = "".join(ch if (ch.isalnum() or ch in ("-", "_")) else "_" for ch in str(label))
         return safe or "profile"
+
+    def _map_command(self, base: PositionCommand) -> PositionCommand:
+        if self.command_type == "position":
+            return base
+        if self.command_type == "velocity":
+            return PositionCommand(
+                position=0.0,
+                velocity=base.position,
+                acceleration=base.velocity,
+            )
+        raise ValueError(f"Unsupported command_type: {self.command_type}")
 
     @staticmethod
     def _normalize_filename_values(values) -> Optional[np.ndarray]:
@@ -164,6 +189,7 @@ class ReferenceGenerator:
 
     def format_profile_settings(self, profile: str) -> str:
         cfg = self.profiles.get(profile, {})
+        unit = "turn/s" if self.command_type == "velocity" else "turn"
 
         def fmt(value):
             if isinstance(value, float):
@@ -178,36 +204,36 @@ class ReferenceGenerator:
                 [
                     f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
                     f"step={fmt(cfg.get('step_duration', 0.0))}s",
-                    f"amp={fmt(cfg.get('output_amplitude', 0.0))}turn",
-                    f"offset={fmt(cfg.get('offset', 0.0))}",
+                    f"amp={fmt(cfg.get('output_amplitude', 0.0))}{unit}",
+                    f"offset={fmt(cfg.get('offset', 0.0))}{unit}",
                 ]
             )
         if profile == "sine":
             return ", ".join(
                 [
                     f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
-                    f"amp={fmt(cfg.get('output_amplitude', 0.0))}turn",
+                    f"amp={fmt(cfg.get('output_amplitude', 0.0))}{unit}",
                     f"freq={fmt(cfg.get('frequency_hz', 0.0))}Hz",
-                    f"offset={fmt(cfg.get('offset', 0.0))}",
+                    f"offset={fmt(cfg.get('offset', 0.0))}{unit}",
                 ]
             )
         if profile == "chirp":
             return ", ".join(
                 [
                     f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
-                    f"amp={fmt(cfg.get('output_amplitude', 0.0))}turn",
+                    f"amp={fmt(cfg.get('output_amplitude', 0.0))}{unit}",
                     f"f0={fmt(cfg.get('start_frequency_hz', 0.0))}Hz",
                     f"f1={fmt(cfg.get('end_frequency_hz', 0.0))}Hz",
                     f"dur={fmt(cfg.get('duration', 0.0))}s",
-                    f"offset={fmt(cfg.get('offset', 0.0))}",
+                    f"offset={fmt(cfg.get('offset', 0.0))}{unit}",
                 ]
             )
         if profile == "ramp":
             return ", ".join(
                 [
                     f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
-                    f"start={fmt(cfg.get('start_value', 0.0))}",
-                    f"end={fmt(cfg.get('end_value', 0.0))}",
+                    f"start={fmt(cfg.get('start_value', 0.0))}{unit}",
+                    f"end={fmt(cfg.get('end_value', 0.0))}{unit}",
                     f"ramp={fmt(cfg.get('ramp_duration', 0.0))}s",
                     f"hold={fmt(cfg.get('hold_duration', 0.0))}s",
                     f"return={fmt(cfg.get('return_duration', 0.0))}s",
@@ -217,8 +243,8 @@ class ReferenceGenerator:
             return ", ".join(
                 [
                     f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
-                    f"start={fmt(cfg.get('start_value', 0.0))}",
-                    f"end={fmt(cfg.get('end_value', 0.0))}",
+                    f"start={fmt(cfg.get('start_value', 0.0))}{unit}",
+                    f"end={fmt(cfg.get('end_value', 0.0))}{unit}",
                     f"ramp={fmt(cfg.get('ramp_duration', 0.0))}s",
                     f"hold={fmt(cfg.get('hold_duration', 0.0))}s",
                     f"return={fmt(cfg.get('return_duration', 0.0))}s",
@@ -229,12 +255,12 @@ class ReferenceGenerator:
             step_cfg = cfg.get("step", {}) if isinstance(cfg.get("step"), dict) else {}
             settings = [
                 f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
-                f"start={fmt(cfg.get('start_value', 0.0))}",
-                f"end={fmt(cfg.get('end_value', 0.0))}",
+                f"start={fmt(cfg.get('start_value', 0.0))}{unit}",
+                f"end={fmt(cfg.get('end_value', 0.0))}{unit}",
                 f"ramp={fmt(cfg.get('ramp_duration', 0.0))}s",
                 f"hold={fmt(cfg.get('hold_duration', 0.0))}s",
                 f"return={fmt(cfg.get('return_duration', 0.0))}s",
-                f"step_amp={fmt(step_cfg.get('amplitude', 0.0))}",
+                f"step_amp={fmt(step_cfg.get('amplitude', 0.0))}{unit}",
                 f"step_dur={fmt(step_cfg.get('duration', 0.0))}s",
             ]
             if step_cfg:
@@ -245,7 +271,7 @@ class ReferenceGenerator:
             return ", ".join(
                 [
                     f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
-                    f"values={fmt(cfg.get('values', []))}",
+                    f"values={fmt(cfg.get('values', []))}{unit}",
                     f"hold={fmt(cfg.get('hold_duration', 0.0))}s",
                     f"repeat={cfg.get('repeat', True)}",
                 ]
@@ -254,8 +280,8 @@ class ReferenceGenerator:
             return ", ".join(
                 [
                     f"wait={fmt(cfg.get('initial_wait', 0.0))}s",
-                    f"start={fmt(cfg.get('start_value', 0.0))}",
-                    f"end={fmt(cfg.get('end_value', 0.0))}",
+                    f"start={fmt(cfg.get('start_value', 0.0))}{unit}",
+                    f"end={fmt(cfg.get('end_value', 0.0))}{unit}",
                     f"rise={fmt(cfg.get('ramp_duration', 0.0))}s",
                     f"hold={fmt(cfg.get('hold_duration', 0.0))}s",
                     f"fall={fmt(cfg.get('return_duration', 0.0))}s",
@@ -414,9 +440,19 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     reference_cfg = _load_yaml(config_dir / "reference.yaml")
     logger_cfg = _load_yaml(config_dir / "logger.yaml")
 
+    command_type = str(
+        controller_cfg.get("command_type", reference_cfg.get("command_type", "position"))
+    ).lower()
+    if command_type not in {"position", "velocity"}:
+        raise ValueError("command_type must be 'position' or 'velocity'")
+    reference_cfg["command_type"] = command_type
+
     dt = float(controller_cfg.get("sample_time_s", 0.005))
     plant_cfg = controller_cfg.get("plant", {})
     mechanism_matrix = np.asarray(plant_cfg.get("mechanism_matrix", [-0.05, 0.0815]))
+    motor_output_gains = np.asarray(
+        plant_cfg.get("motor_output_gains", mechanism_matrix), dtype=float
+    )
     inertia = float(plant_cfg.get("inertia", 0.015))
     damping = float(plant_cfg.get("damping", 0.002))
 
@@ -425,19 +461,46 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     derivative_mode = per_motor_cfg.get("derivative_mode", "error")
     derivative_alpha = float(per_motor_cfg.get("derivative_filter_alpha", 1.0))
 
-    controller = PositionController(
-        gains=outer_pid,
-        plant_inertia=inertia,
-        plant_damping=damping,
-        dt=dt,
-        derivative_mode=derivative_mode,
-        derivative_filter_alpha=derivative_alpha,
-    )
+    if command_type == "velocity":
+        velocity_pid = controller_cfg.get("velocity_pid", outer_pid)
+        controller = VelocityController(
+            gains=velocity_pid,
+            plant_inertia=inertia,
+            plant_damping=damping,
+            dt=dt,
+            derivative_mode=derivative_mode,
+            derivative_filter_alpha=derivative_alpha,
+        )
+    else:
+        controller = PositionController(
+            gains=outer_pid,
+            plant_inertia=inertia,
+            plant_damping=damping,
+            dt=dt,
+            derivative_mode=derivative_mode,
+            derivative_filter_alpha=derivative_alpha,
+        )
 
     dob_cfg = controller_cfg.get("dob", {})
-    cutoff_hz = float(dob_cfg.get("cutoff_hz", 20.0))
-    dob_use_damping = bool(dob_cfg.get("use_damping", True))
-    dob = DisturbanceObserver(inertia, damping, dt, cutoff_hz, use_damping=dob_use_damping)
+    dob_enabled = bool(dob_cfg.get("enabled", True))
+    dob_input_mode = str(dob_cfg.get("torque_input_mode", "command")).lower()
+    dob_applied_sign = float(
+        dob_cfg.get("applied_sign", -1.0 if dob_input_mode == "applied" else 1.0)
+    )
+    dob: Optional[DisturbanceObserver]
+    if dob_enabled:
+        cutoff_hz = float(dob_cfg.get("cutoff_hz", 20.0))
+        dob_use_damping = bool(dob_cfg.get("use_damping", True))
+        dob = DisturbanceObserver(
+            inertia,
+            damping,
+            dt,
+            cutoff_hz,
+            use_damping=dob_use_damping,
+            torque_input_mode=dob_input_mode,
+        )
+    else:
+        dob = None
 
     torque_limits = controller_cfg.get("torque_limits", {})
     rate_limits = controller_cfg.get("torque_rate_limits", {})
@@ -488,28 +551,71 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         "odrive": odrive_iface,
         "config": controller_cfg,
         "dt": dt,
+        "command_type": command_type,
         "mechanism_matrix": mechanism_matrix,
+        "motor_output_gains": motor_output_gains,
+        "dob_enabled": dob_enabled,
+        "dob_input_mode": dob_input_mode,
+        "dob_applied_sign": dob_applied_sign,
     }
 
 
 def run_control_loop(modules: Dict[str, object], duration: Optional[float] = None) -> None:
-    controller: PositionController = modules["controller"]
-    dob: DisturbanceObserver = modules["dob"]
+    controller = modules["controller"]
+    dob: Optional[DisturbanceObserver] = modules["dob"]
+    dob_enabled: bool = modules.get("dob_enabled", True)
+    dob_input_mode: str = modules.get("dob_input_mode", "command")
+    dob_applied_sign: float = float(modules.get("dob_applied_sign", 1.0))
     allocator: TorqueAllocator = modules["allocator"]
     assist_manager: Optional[AssistManager] = modules["assist"]
     reference: ReferenceGenerator = modules["reference"]
     logger: DataLogger = modules["logger"]
     odrive_iface: ODriveInterface = modules["odrive"]
     dt: float = modules["dt"]
+    command_type = str(modules.get("command_type", "position")).lower()
+    mechanism_matrix = np.asarray(modules.get("mechanism_matrix"), dtype=float)
+    motor_output_gains = np.asarray(
+        modules.get("motor_output_gains", mechanism_matrix), dtype=float
+    )
+    use_measured_torque = dob_enabled and dob_input_mode == "applied"
+    measured_tau = np.zeros(2, dtype=float)
+    measured_iq = np.zeros(2, dtype=float)
+    measured_tau_time = 0.0
+    measured_tau_lock = threading.Lock()
+    stop_measured_torque = threading.Event()
+    torque_poll_thread: Optional[threading.Thread] = None
 
     odrive_iface.connect(calibrate=False)
     odrive_iface.zero_positions()
     _LOGGER.info("Control loop started (dt=%.6f s)", dt)
 
+    def _poll_measured_torque() -> None:
+        nonlocal measured_tau_time
+        poll_interval = max(0.0005, dt)  # do not spin too fast
+        while not stop_measured_torque.is_set():
+            try:
+                poll_states = odrive_iface.read_states(fast=False)
+                with measured_tau_lock:
+                    measured_tau[0] = poll_states["motor1"].torque_measured
+                    measured_tau[1] = poll_states["motor2"].torque_measured
+                    measured_iq[0] = poll_states["motor1"].current_iq
+                    measured_iq[1] = poll_states["motor2"].current_iq
+                    measured_tau_time = time.time()
+            except Exception:
+                _LOGGER.exception("Failed to poll measured torque.")
+            stop_measured_torque.wait(poll_interval)
+
+    if use_measured_torque:
+        torque_poll_thread = threading.Thread(
+            target=_poll_measured_torque, name="torque_sampler", daemon=True
+        )
+        torque_poll_thread.start()
+
     start_time = time.time()
     running = True
     prev_loop_time = start_time
     loop_intervals: list[float] = []
+    prev_tau_alloc = np.zeros(2, dtype=float)  # last commanded motor torques
 
     try:
         while running:
@@ -530,7 +636,52 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 velocity=output_state.velocity,
             )
             tau_cmd, ctrl_diag = controller.update(command, feedback)
-            tau_aug, dob_diag = dob.update(feedback.velocity, tau_cmd)
+            if command_type == "velocity":
+                reference_position = 0.0
+                reference_velocity = command.velocity
+            else:
+                reference_position = command.position
+                reference_velocity = command.velocity
+
+            if use_measured_torque:
+                with measured_tau_lock:
+                    tau_measured_snapshot = measured_tau.copy()
+                    iq_measured_snapshot = measured_iq.copy()
+                    has_measured_tau = measured_tau_time > 0.0
+            else:
+                tau_measured_snapshot = np.array(
+                    [
+                        states["motor1"].torque_measured,
+                        states["motor2"].torque_measured,
+                    ],
+                    dtype=float,
+                )
+                iq_measured_snapshot = np.array(
+                    [
+                        states["motor1"].current_iq,
+                        states["motor2"].current_iq,
+                    ],
+                    dtype=float,
+                )
+                has_measured_tau = True
+
+            if dob_enabled and dob is not None:
+                torque_applied_input = None
+                if dob_input_mode == "applied":
+                    if use_measured_torque and has_measured_tau:
+                        applied_motor_tau = tau_measured_snapshot
+                    else:
+                        applied_motor_tau = prev_tau_alloc
+                    applied_tau_out = dob_applied_sign * float(
+                        np.dot(motor_output_gains, applied_motor_tau)
+                    )
+                    torque_applied_input = applied_tau_out
+                tau_aug, dob_diag = dob.update(
+                    feedback.velocity, tau_cmd, torque_applied=torque_applied_input
+                )
+            else:
+                tau_aug = tau_cmd
+                dob_diag = {"filtered_disturbance": 0.0}
 
             if assist_manager is not None:
                 assist_status = assist_manager.update(tau_aug)
@@ -541,6 +692,8 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 secondary_gain = 1.0
 
             tau_alloc, alloc_diag = allocator.allocate(tau_aug, weights, secondary_gain)
+            # 次周期のDOB入力用に、今回送ったモータ指令を保存
+            prev_tau_alloc = tau_alloc.copy()
             odrive_iface.command_torques(float(tau_alloc[0]), float(tau_alloc[1]))
             t_ctrl_end = time.perf_counter()
 
@@ -553,16 +706,17 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 motor1_state.position,
                 motor1_state.velocity,
                 tau_alloc[0],
-                motor1_state.current_iq,
-                motor1_state.torque_measured,
+                float(iq_measured_snapshot[0]),
+                float(tau_measured_snapshot[0]),
                 motor2_state.position,
                 motor2_state.velocity,
                 tau_alloc[1],
-                motor2_state.current_iq,
-                motor2_state.torque_measured,
+                float(iq_measured_snapshot[1]),
+                float(tau_measured_snapshot[1]),
                 output_state.position,
                 output_state.velocity,
-                command.position,
+                reference_position,
+                reference_velocity=reference_velocity,
                 reference_control=tau_cmd,
                 tau_pid=tau_cmd,
                 tau_dob=tau_aug,
@@ -579,6 +733,9 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
         _LOGGER.info("Keyboard interrupt received, stopping control loop.")
         running = False
     finally:
+        if use_measured_torque and torque_poll_thread is not None:
+            stop_measured_torque.set()
+            torque_poll_thread.join(timeout=1.0)
         odrive_iface.shutdown()
         metadata = {
             "DurationSec": f"{time.time() - start_time:.3f}",

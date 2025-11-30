@@ -23,11 +23,17 @@ plt.rcParams.update(
 )
 
 
-def _read_log(path: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
-    rows: List[Dict[str, float]] = []
+def _read_log(path: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray], Dict[str, str]]:
+    rows: List[str] = []
+    metadata: Dict[str, str] = {}
     with path.open("r", newline="") as f:
         for line in f:
-            if line.startswith("#") or not line.strip():
+            if not line.strip():
+                continue
+            if line.startswith("#"):
+                parts = line[1:].split("=", 1)
+                if len(parts) == 2:
+                    metadata[parts[0].strip()] = parts[1].strip()
                 continue
             rows.append(line)
     if not rows:
@@ -41,7 +47,7 @@ def _read_log(path: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
 
     time = np.asarray(columns["time"], dtype=float)
     series = {name: np.asarray(values, dtype=float) for name, values in columns.items()}
-    return time, series
+    return time, series, metadata
 
 
 def _resolve_series(series: Dict[str, np.ndarray], candidates: Iterable[str]) -> Tuple[str, np.ndarray]:
@@ -52,9 +58,14 @@ def _resolve_series(series: Dict[str, np.ndarray], candidates: Iterable[str]) ->
 
 
 def plot_csv(csv_path: Path, save_path: Path | None = None, show: bool = False) -> Path:
-    time, series = _read_log(csv_path)
+    time, series, metadata = _read_log(csv_path)
 
-    _, theta_ref = _resolve_series(series, ("theta_ref",))
+    command_type = metadata.get("CommandType", "position").lower()
+    if command_type not in {"position", "velocity"}:
+        command_type = "position"
+
+    theta_ref = series.get("theta_ref")
+    omega_ref = series.get("omega_ref")
     _, output_pos = _resolve_series(series, ("output_pos",))
     _, output_vel = _resolve_series(series, ("output_vel",))
     _, tau_1 = _resolve_series(series, ("tau_1", "motor0_torque", "motor1_torque"))
@@ -62,20 +73,32 @@ def plot_csv(csv_path: Path, save_path: Path | None = None, show: bool = False) 
 
     fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
 
-    axes[0].plot(time, theta_ref * 360.0, "--", label=r"$\theta_{\mathrm{ref}}$ [deg]")
-    axes[0].plot(time, output_pos * 360.0, "-", label=r"$\theta_{\mathrm{out}}$ [deg]")
-    axes[0].set_ylabel(r"$\theta$ [deg]")
-    axes[0].legend(loc="upper right")
+    if command_type == "velocity" and omega_ref is not None:
+        axes[0].plot(time, omega_ref * 360.0, "--", label=r"$\omega_{\mathrm{ref}}$ [deg/s]")
+        axes[0].plot(time, output_vel * 360.0, "-", label=r"$\omega_{\mathrm{out}}$ [deg/s]")
+        axes[0].set_ylabel(r"$\omega$ [deg/s]")
+        axes[0].legend(loc="upper right")
 
-    axes[1].plot(
-        time,
-        output_vel * 360.0,
-        "-",
-        color="tab:green",
-        label=r"$\omega_{\mathrm{out}}$ [deg/s]",
-    )
-    axes[1].set_ylabel(r"$\omega$ [deg/s]")
-    axes[1].legend(loc="upper right")
+        axes[1].plot(time, output_pos * 360.0, "-", label=r"$\theta_{\mathrm{out}}$ [deg]")
+        axes[1].set_ylabel(r"$\theta$ [deg]")
+        axes[1].legend(loc="upper right")
+    else:
+        if theta_ref is None:
+            _, theta_ref = _resolve_series(series, ("theta_ref",))
+        axes[0].plot(time, theta_ref * 360.0, "--", label=r"$\theta_{\mathrm{ref}}$ [deg]")
+        axes[0].plot(time, output_pos * 360.0, "-", label=r"$\theta_{\mathrm{out}}$ [deg]")
+        axes[0].set_ylabel(r"$\theta$ [deg]")
+        axes[0].legend(loc="upper right")
+
+        axes[1].plot(
+            time,
+            output_vel * 360.0,
+            "-",
+            color="tab:green",
+            label=r"$\omega_{\mathrm{out}}$ [deg/s]",
+        )
+        axes[1].set_ylabel(r"$\omega$ [deg/s]")
+        axes[1].legend(loc="upper right")
 
     axes[2].plot(time, tau_1, "-", color="tab:blue", label=r"$\tau_1$")
     axes[2].plot(time, tau_2, "-", color="tab:red", label=r"$\tau_2$")
