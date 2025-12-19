@@ -9,7 +9,7 @@ import numpy as np
 def min_norm_torque_split(
     mechanism_matrix: np.ndarray, tau_out: float, weights: np.ndarray
 ) -> np.ndarray:
-    """Weighted minimum-norm torque split."""
+    """Weighted minimum-norm torque split (cost = sum_i w_i * tau_i^2)."""
     A = np.asarray(mechanism_matrix, dtype=float).reshape(1, 2)
     weights = np.asarray(weights, dtype=float).reshape(2)
     if np.any(weights <= 0.0):
@@ -103,6 +103,8 @@ class TorqueAllocator:
         rate_limits: Dict[str, float] | None = None,
         preferred_motor: str | None = None,
         sign_enforcement: bool = True,
+        weight_mode: str = "raw",
+        preference_mode: str = "primary",
     ) -> None:
         self.A = np.asarray(mechanism_matrix, dtype=float).reshape(1, 2)
         self.torque_limits = np.array(
@@ -120,6 +122,8 @@ class TorqueAllocator:
         )
         self.preferred_motor = preferred_motor
         self.sign_enforcement = bool(sign_enforcement)
+        self.weight_mode = str(weight_mode).lower()
+        self.preference_mode = str(preference_mode).lower()
         self.prev_tau = np.zeros(2, dtype=float)
 
     def reset(self) -> None:
@@ -132,10 +136,11 @@ class TorqueAllocator:
         secondary_gain: float = 1.0,
     ) -> Tuple[np.ndarray, Dict[str, float]]:
         weights = np.asarray(weights, dtype=float).reshape(2)
-        tau_preferred = min_norm_torque_split(self.A, tau_out, weights)
+        eff_weights = self._effective_weights(weights)
+        tau_preferred = min_norm_torque_split(self.A, tau_out, eff_weights)
         tau_preferred = self._apply_preference(tau_preferred, secondary_gain)
         tau_solution = _solve_with_limits(
-            self.A, tau_out, self.torque_limits, weights, tau_preferred
+            self.A, tau_out, self.torque_limits, eff_weights, tau_preferred
         )
         tau_solution = self._enforce_rate_limits(tau_solution)
         if self.sign_enforcement:
@@ -150,12 +155,23 @@ class TorqueAllocator:
 
     def _apply_preference(self, tau: np.ndarray, secondary_gain: float) -> np.ndarray:
         tau = np.asarray(tau, dtype=float).reshape(2).copy()
-        if self.preferred_motor is None:
+        if self.preference_mode != "primary" or self.preferred_motor is None:
             return tau
         secondary_idx = 1 if self.preferred_motor == "motor1" else 0
         gain = max(0.0, min(1.0, float(secondary_gain)))
         tau[secondary_idx] *= gain
         return tau
+
+    def _effective_weights(self, weights: np.ndarray) -> np.ndarray:
+        weights = np.asarray(weights, dtype=float).reshape(2)
+        if np.any(weights <= 0.0):
+            raise ValueError("weights must be strictly positive")
+        if self.weight_mode == "torque_utilization":
+            if np.any(self.torque_limits <= 0.0):
+                raise ValueError("Torque limits must be positive for utilization weighting.")
+            scale = self.torque_limits ** 2
+            return weights / scale
+        return weights
 
     def _enforce_rate_limits(self, tau: np.ndarray) -> np.ndarray:
         tau = np.asarray(tau, dtype=float).reshape(2).copy()

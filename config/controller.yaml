@@ -2,6 +2,9 @@ control_frequency_hz: 200
 sample_time_s: 0.005
 command_type: position  # position | velocity
 
+torque_allocation:
+  weight_mode: raw  # torque_utilization | raw
+
 plant:
   inertia: 0.009967215896643318
   damping: 8.172049793342932
@@ -9,10 +12,10 @@ plant:
   motor_output_gains: [-20.0, 12.26993865]
 
 outer_pid:
-  kp: 30.00
-  ki: 0.0
-  kd: 10.0
-  max_output: 50.0
+  kp: 18.00
+  ki: 0.2
+  kd: 6.0
+  max_output: 100.0
 
 velocity_pid:
   kp: 35.00
@@ -37,6 +40,7 @@ per_motor_pid:
 
 assist_manager:
   enabled: true
+  mode: balanced  # balanced: use both motors; threshold: primary-first with activation thresholds
   primary_motor: motor1
   release_start_ratio: 0.5
   release_full_ratio: 0.9
@@ -59,16 +63,22 @@ assist_manager:
   time_constant: 0.05
 
 torque_preference:
+  mode: balanced  # primary: prefer one motor, balanced: no preference
   preferred_motor: motor1
   secondary_gain: 0.0
 
 torque_limits:
-  motor1: 6.0 
-  motor2: 1.0
+  motor1: 6.0
+  motor2: 0.5
 
 torque_rate_limits:
   motor1: 100.0
   motor2: 100.0
+
+friction_ff:
+  coulomb: 0.15       # [Nm] output-axis Coulomb friction feedforward
+  vel_deadband: 0.02  # [turn/s] use direction hint while nearly stopped
+  blend_width: 0.05   # [turn/s] tanh smoothing width outside deadband
 
 freeze:
   motor: None
@@ -82,8 +92,8 @@ sign_enforcement:
 dob:
   enabled: true
   torque_input_mode: applied  # command | applied
-  applied_sign: 1.0           # appliedが不安定なら -1.0 で符号補正
-  cutoff_hz: 2.0
+  applied_sign: -1.0           # appliedが不安定なら -1.0 で符号補正
+  cutoff_hz: 5.0
   use_damping: false
 
 identification:

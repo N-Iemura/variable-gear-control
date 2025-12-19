@@ -504,8 +504,11 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
 
     torque_limits = controller_cfg.get("torque_limits", {})
     rate_limits = controller_cfg.get("torque_rate_limits", {})
+    allocation_cfg = controller_cfg.get("torque_allocation", {})
     preference_cfg = controller_cfg.get("torque_preference", {})
     sign_cfg = controller_cfg.get("sign_enforcement", {})
+    weight_mode = str(allocation_cfg.get("weight_mode", "raw")).lower()
+    preference_mode = str(preference_cfg.get("mode", "primary")).lower()
 
     allocator = TorqueAllocator(
         mechanism_matrix=mechanism_matrix,
@@ -514,6 +517,8 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         rate_limits=rate_limits,
         preferred_motor=preference_cfg.get("preferred_motor"),
         sign_enforcement=sign_cfg.get("enabled", True),
+        weight_mode=weight_mode,
+        preference_mode=preference_mode,
     )
 
     assist_cfg = controller_cfg.get("assist_manager", {})
@@ -530,6 +535,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
 
     hardware = hardware_cfg
     reference = ReferenceGenerator(reference_cfg)
+    friction_ff = controller_cfg.get("friction_ff", {})
     logger = DataLogger(
         logger_cfg,
         base_path=config_dir.parent,
@@ -549,6 +555,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         "logger": logger,
         "hardware": hardware,
         "odrive": odrive_iface,
+        "friction_ff": friction_ff,
         "config": controller_cfg,
         "dt": dt,
         "command_type": command_type,
@@ -577,6 +584,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     motor_output_gains = np.asarray(
         modules.get("motor_output_gains", mechanism_matrix), dtype=float
     )
+    friction_cfg = modules.get("friction_ff", {}) or {}
     use_measured_torque = dob_enabled and dob_input_mode == "applied"
     measured_tau = np.zeros(2, dtype=float)
     measured_iq = np.zeros(2, dtype=float)
@@ -584,6 +592,23 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     measured_tau_lock = threading.Lock()
     stop_measured_torque = threading.Event()
     torque_poll_thread: Optional[threading.Thread] = None
+
+    def friction_feedforward(velocity: float, reference_velocity: float, error_hint: float) -> float:
+        """Return output-axis friction feedforward torque."""
+        coulomb = float(friction_cfg.get("coulomb", 0.0))
+        if abs(coulomb) < 1e-12:
+            return 0.0
+        vel_deadband = abs(float(friction_cfg.get("vel_deadband", 0.0)))
+        blend_width = max(float(friction_cfg.get("blend_width", 0.05)), 1e-6)
+        vel = float(velocity)
+        if abs(vel) < vel_deadband:
+            direction = reference_velocity if abs(reference_velocity) > 1e-9 else error_hint
+            if abs(direction) < 1e-9:
+                direction = vel
+            if abs(direction) < 1e-9:
+                return 0.0
+            return math.copysign(coulomb, direction)
+        return coulomb * math.tanh(vel / blend_width)
 
     odrive_iface.connect(calibrate=False)
     odrive_iface.zero_positions()
@@ -635,13 +660,23 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 position=output_state.position,
                 velocity=output_state.velocity,
             )
-            tau_cmd, ctrl_diag = controller.update(command, feedback)
+            tau_ctrl, ctrl_diag = controller.update(command, feedback)
             if command_type == "velocity":
                 reference_position = 0.0
                 reference_velocity = command.velocity
             else:
                 reference_position = command.position
                 reference_velocity = command.velocity
+            error_hint = float(
+                ctrl_diag.get(
+                    "error",
+                    reference_velocity if command_type == "velocity" else reference_position - feedback.position,
+                )
+            )
+            friction_tau = friction_feedforward(
+                output_state.velocity, reference_velocity, error_hint
+            )
+            tau_cmd = tau_ctrl + friction_tau
 
             if use_measured_torque:
                 with measured_tau_lock:
@@ -718,7 +753,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 reference_position,
                 reference_velocity=reference_velocity,
                 reference_control=tau_cmd,
-                tau_pid=tau_cmd,
+                tau_pid=tau_ctrl,
                 tau_dob=tau_aug,
                 dob_disturbance=dob_diag.get("filtered_disturbance", 0.0),
                 tau_out=tau_aug,

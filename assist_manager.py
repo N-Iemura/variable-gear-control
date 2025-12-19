@@ -28,6 +28,7 @@ class AssistManager:
     ) -> None:
         self.dt = float(dt)
         self.A = np.asarray(mechanism_matrix, dtype=float).reshape(2)
+        self.mode = str(config.get("mode", "threshold")).lower()
         self.primary_motor = str(config.get("primary_motor", "motor1"))
         self.primary_index = 0 if self.primary_motor == "motor1" else 1
         self.secondary_index = 1 - self.primary_index
@@ -76,6 +77,16 @@ class AssistManager:
         self.assist_flag = False
 
     def update(self, tau_out_aug: float) -> AssistStatus:
+        if self.mode == "balanced":
+            weights = np.ones(2, dtype=float)
+            return AssistStatus(
+                assist_enabled=True,
+                blend=1.0,
+                load_ratio=0.0,
+                weights=weights,
+                secondary_gain=1.0,
+            )
+
         load_ratio = self._compute_load_ratio(tau_out_aug)
         target_flag = self._compute_target_flag(load_ratio)
         target_blend = 1.0 if target_flag else self._release_progress(load_ratio)
