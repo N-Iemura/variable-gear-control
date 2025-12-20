@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+mode="${1:-torque}"
+if [[ "${mode}" == "torque" ]]; then
+  shift || true
+  exec python3 "${SCRIPT_DIR}/run_motor2_only.py" \
+    --mode torque \
+    --torque-set 0.05 0.1 -0.05 -0.1 \
+    "$@"
+elif [[ "${mode}" == "velocity" ]]; then
+  shift || true
+  exec python3 "${SCRIPT_DIR}/run_motor2_only.py" --mode velocity "$@"
+elif [[ "${mode}" == "odrive" ]]; then
+  shift || true
+  exec python3 "${SCRIPT_DIR}/run_motor2_only.py" --mode odrive "$@"
+else
+  exec python3 "${SCRIPT_DIR}/run_motor2_only.py" "$@"
+fi

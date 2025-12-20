@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 try:
     import odrive
@@ -13,12 +13,19 @@ try:
         AXIS_STATE_FULL_CALIBRATION_SEQUENCE,
         CONTROL_MODE_TORQUE_CONTROL,
     )
+    try:  # Optional in older firmware/tooling.
+        from odrive.enums import CONTROL_MODE_VELOCITY_CONTROL, INPUT_MODE_PASSTHROUGH
+    except ImportError:
+        CONTROL_MODE_VELOCITY_CONTROL = 2
+        INPUT_MODE_PASSTHROUGH = 1
 except ImportError as exc:  # pragma: no cover - hardware dependency
     odrive = None
     AXIS_STATE_CLOSED_LOOP_CONTROL = 8
     AXIS_STATE_IDLE = 1
     AXIS_STATE_FULL_CALIBRATION_SEQUENCE = 3
     CONTROL_MODE_TORQUE_CONTROL = 1
+    CONTROL_MODE_VELOCITY_CONTROL = 2
+    INPUT_MODE_PASSTHROUGH = 1
     _IMPORT_ERROR = exc
 else:
     _IMPORT_ERROR = None
@@ -56,17 +63,55 @@ class ODriveAxisHandle:
     def prepare_for_torque_control(self) -> None:
         if not self.is_motor:
             return
-        if self.torque_constant is not None:
-            if hasattr(self.axis, "config") and hasattr(self.axis.config, "motor"):
-                self.axis.config.motor.torque_constant = float(self.torque_constant)
-            elif hasattr(self.axis, "motor") and hasattr(self.axis.motor, "config"):
-                self.axis.motor.config.torque_constant = float(self.torque_constant)
+        self._apply_torque_constant()
         controller_cfg = getattr(self.axis, "controller", None)
         if controller_cfg and hasattr(controller_cfg, "config"):
             controller_cfg.config.control_mode = CONTROL_MODE_TORQUE_CONTROL
+            if hasattr(controller_cfg.config, "input_mode"):
+                controller_cfg.config.input_mode = INPUT_MODE_PASSTHROUGH
         self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
         if controller_cfg and hasattr(controller_cfg, "input_torque"):
             controller_cfg.input_torque = 0.0
+
+    def prepare_for_velocity_control(self) -> None:
+        if not self.is_motor:
+            return
+        self._apply_torque_constant()
+        controller_cfg = getattr(self.axis, "controller", None)
+        if controller_cfg and hasattr(controller_cfg, "config"):
+            controller_cfg.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL
+            if hasattr(controller_cfg.config, "input_mode"):
+                controller_cfg.config.input_mode = INPUT_MODE_PASSTHROUGH
+        self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        if controller_cfg is not None:
+            if hasattr(controller_cfg, "input_vel"):
+                controller_cfg.input_vel = 0.0
+            elif hasattr(controller_cfg, "vel_setpoint"):
+                controller_cfg.vel_setpoint = 0.0
+
+    def set_velocity_gains(
+        self,
+        vel_gain: Optional[float] = None,
+        vel_integrator_gain: Optional[float] = None,
+        vel_integrator_limit: Optional[float] = None,
+    ) -> Dict[str, float]:
+        if not self.is_motor:
+            return {}
+        controller_cfg = getattr(self.axis, "controller", None)
+        config = getattr(controller_cfg, "config", None) if controller_cfg is not None else None
+        if config is None:
+            return {}
+        applied: Dict[str, float] = {}
+        if vel_gain is not None and hasattr(config, "vel_gain"):
+            config.vel_gain = float(vel_gain)
+            applied["vel_gain"] = float(getattr(config, "vel_gain"))
+        if vel_integrator_gain is not None and hasattr(config, "vel_integrator_gain"):
+            config.vel_integrator_gain = float(vel_integrator_gain)
+            applied["vel_integrator_gain"] = float(getattr(config, "vel_integrator_gain"))
+        if vel_integrator_limit is not None and hasattr(config, "vel_integrator_limit"):
+            config.vel_integrator_limit = float(vel_integrator_limit)
+            applied["vel_integrator_limit"] = float(getattr(config, "vel_integrator_limit"))
+        return applied
 
     def request_state(self, state: int) -> None:
         self.axis.requested_state = state
@@ -127,6 +172,20 @@ class ODriveAxisHandle:
         if controller is not None and hasattr(controller, "input_torque"):
             controller.input_torque = float(torque)
 
+    def command_velocity(self, velocity: float) -> None:
+        if not self.is_motor:
+            return
+        controller = getattr(self.axis, "controller", None)
+        if controller is None:
+            return
+        if hasattr(controller, "input_vel"):
+            controller.input_vel = float(velocity)
+            return
+        if hasattr(controller, "vel_setpoint"):
+            controller.vel_setpoint = float(velocity)
+            return
+        raise AttributeError("ODrive controller does not expose a velocity setpoint attribute.")
+
     def idle(self) -> None:
         self.request_state(AXIS_STATE_IDLE)
 
@@ -153,6 +212,14 @@ class ODriveAxisHandle:
 
         return 0.0, 0.0
 
+    def _apply_torque_constant(self) -> None:
+        if self.torque_constant is None:
+            return
+        if hasattr(self.axis, "config") and hasattr(self.axis.config, "motor"):
+            self.axis.config.motor.torque_constant = float(self.torque_constant)
+        elif hasattr(self.axis, "motor") and hasattr(self.axis.motor, "config"):
+            self.axis.motor.config.torque_constant = float(self.torque_constant)
+
 
 class ODriveInterface:
     """High-level orchestration for a pair of ODrive-controlled motors."""
@@ -171,20 +238,31 @@ class ODriveInterface:
         self.output_axis: Optional[ODriveAxisHandle] = None
         self.position_offsets: Dict[str, float] = {}
 
-    def connect(self, calibrate: bool = False) -> None:
+    def connect(
+        self,
+        calibrate: bool = False,
+        control_mode: str = "torque",
+        axes: Sequence[str] | None = None,
+    ) -> None:
         _LOGGER.info("Connecting to ODrive devices...")
-        motor1 = self._connect_axis("motor1", calibrate=calibrate, is_motor=True)
-        motor2 = self._connect_axis("motor2", calibrate=calibrate, is_motor=True)
-        output = self._connect_axis("output", calibrate=False, is_motor=False)
+        axes = list(axes) if axes is not None else ["motor1", "motor2", "output"]
+        allowed = {"motor1", "motor2", "output"}
+        unknown = [name for name in axes if name not in allowed]
+        if unknown:
+            raise ValueError(f"Unsupported axes requested: {unknown}")
 
-        self.devices["motor1"] = motor1
-        self.devices["motor2"] = motor2
-        self.output_axis = output
+        self.devices = {}
+        self.output_axis = None
+        self.position_offsets = {}
 
-        for name, axis in self.devices.items():
-            axis.prepare_for_torque_control()
-            if axis.is_motor:
-                _LOGGER.info("Closed-loop torque control ready on %s", name)
+        if "motor1" in axes:
+            self.devices["motor1"] = self._connect_axis("motor1", calibrate=calibrate, is_motor=True)
+        if "motor2" in axes:
+            self.devices["motor2"] = self._connect_axis("motor2", calibrate=calibrate, is_motor=True)
+        if "output" in axes:
+            self.output_axis = self._connect_axis("output", calibrate=False, is_motor=False)
+
+        self.set_motor_control_mode(control_mode)
         self.zero_positions()
 
     def _connect_axis(
@@ -254,8 +332,30 @@ class ODriveInterface:
         return states
 
     def command_torques(self, tau_motor1: float, tau_motor2: float) -> None:
-        self.devices["motor1"].command_torque(tau_motor1)
-        self.devices["motor2"].command_torque(tau_motor2)
+        if "motor1" in self.devices:
+            self.devices["motor1"].command_torque(tau_motor1)
+        if "motor2" in self.devices:
+            self.devices["motor2"].command_torque(tau_motor2)
+
+    def command_velocities(self, vel_motor1: float, vel_motor2: float) -> None:
+        if "motor1" in self.devices:
+            self.devices["motor1"].command_velocity(vel_motor1)
+        if "motor2" in self.devices:
+            self.devices["motor2"].command_velocity(vel_motor2)
+
+    def set_motor_control_mode(self, mode: str) -> None:
+        mode = str(mode).lower()
+        for name, axis in self.devices.items():
+            if not axis.is_motor:
+                continue
+            if mode == "velocity":
+                axis.prepare_for_velocity_control()
+                _LOGGER.info("Closed-loop velocity control ready on %s", name)
+            elif mode == "torque":
+                axis.prepare_for_torque_control()
+                _LOGGER.info("Closed-loop torque control ready on %s", name)
+            else:
+                raise ValueError(f"Unsupported control mode: {mode}")
 
     def shutdown(self) -> None:
         for handle in self.devices.values():
@@ -264,3 +364,19 @@ class ODriveInterface:
                 handle.idle()
             except Exception:  # pragma: no cover - best effort shutdown
                 _LOGGER.exception("Failed to safely idle axis.")
+
+    def set_velocity_gains(
+        self,
+        name: str,
+        vel_gain: Optional[float] = None,
+        vel_integrator_gain: Optional[float] = None,
+        vel_integrator_limit: Optional[float] = None,
+    ) -> Dict[str, float]:
+        handle = self.devices.get(name)
+        if handle is None:
+            return {}
+        return handle.set_velocity_gains(
+            vel_gain=vel_gain,
+            vel_integrator_gain=vel_integrator_gain,
+            vel_integrator_limit=vel_integrator_limit,
+        )

@@ -1,0 +1,80 @@
+sample_time_s: 0.005
+initial_wait_s: 1.0
+settle_time_s: 0.5
+hold_time_s: 1.5
+rest_time_s: 0.3
+cooldown_s: 1.0
+log_prefix: prelim
+
+kinematic:
+  a1: -0.05
+  a2: 0.0814285714
+
+measurement_sign:
+  motor1: 1.0
+  motor2: 1.0
+  output: -1.0
+
+command_sign:
+  motor1: 1.0
+  motor2: 1.0
+
+zero_torque_on_zero_cmd: true
+velocity_feedback_limit_rad_s:
+  motor2: 10.0
+velocity_filter_alpha:
+  motor2: 0.05
+torque_rate_limit_Nm_s:
+  motor2: 5.0
+
+fast_read: true
+iq_read_interval_s: 0.05
+
+command_ramp_rate_rad_s_per_s:
+  motor1: 10.0
+  motor2: 40.0
+
+torque_limits:
+  motor1: 6.0
+  motor2: 0.5
+
+velocity_pid:
+  motor1:
+    kp: 0.05
+    ki: 0.0
+    kd: 0.0
+    derivative_filter_alpha: 0.2
+  motor2:
+    kp: 0.001
+    ki: 0.0
+    kd: 0.0
+    integrator_limit: 0.02
+    derivative_filter_alpha: 0.2
+
+exp1:
+  velocity_set_rad_s: [-2, -1, 0, 1, 2]
+
+exp2:
+  motor1_velocity_rad_s: 2.0
+  rho_list: [-1.0, -0.5, 0.0, 0.5, 1.0]
+
+exp3:
+  motor1_velocity_rad_s: [1, 2, -1, -2]
+
+exp5:
+  motor2_velocity_rad_s: [10, 20, -20, -10]
+
+motor2_only:
+  motor2_velocity_rad_s: [10, 20, -20, -10]
+  odrive_velocity_gains:
+    motor2:
+      vel_gain: 0.07
+      vel_integrator_gain: 0.12
+      vel_integrator_limit: 0.2
+
+exp4:
+  motor1_velocity_rad_s: 0.3
+  hold_time_s: 3.0
+  cycles: 4
+  pause_time_s: 0.0
+  settle_time_s: 0.2
