@@ -1,6 +1,7 @@
 control_frequency_hz: 200
 sample_time_s: 0.005
 command_type: position  # position | velocity
+motor_control_mode: torque  # torque | velocity
 
 torque_allocation:
   weight_mode: raw  # torque_utilization | raw
@@ -8,19 +9,23 @@ torque_allocation:
 plant:
   inertia: 0.009967215896643318
   damping: 8.172049793342932
+  # inertia: 0.0
+  # damping: 0.0
   mechanism_matrix: [-20.0, 12.26993865]
   motor_output_gains: [-20.0, 12.26993865]
 
 outer_pid:
-  kp: 18.00
-  ki: 0.2
-  kd: 6.0
+  kp: 10.00
+  ki: 10.0
+  kd: 2.0
+  use_feedforward: true
   max_output: 100.0
 
 velocity_pid:
-  kp: 35.00
-  ki: 10.0
-  kd: 10.0
+  kp: 0.5
+  ki: 0.0
+  kd: 0.0
+  use_feedforward: false
   max_output: 50.0
 
 per_motor_pid:
@@ -75,8 +80,22 @@ torque_rate_limits:
   motor1: 100.0
   motor2: 100.0
 
+velocity_distribution:
+  kinematic_matrix: [-0.05, 0.0814285714]
+  direct_velocity: false
+  output_velocity_limit: 5.0
+  output_accel_limit: 20.0
+  velocity_limits:
+    motor1: 50.0
+    motor2: 50.0
+  velocity_rate_limits:
+    motor1: 100.0
+    motor2: 100.0
+  use_damping_comp: false
+  use_friction_comp: false
+
 friction_ff:
-  coulomb: 0.15       # [Nm] output-axis Coulomb friction feedforward
+  coulomb: 0.0     # [Nm] output-axis Coulomb friction feedforward
   vel_deadband: 0.02  # [turn/s] use direction hint while nearly stopped
   blend_width: 0.05   # [turn/s] tanh smoothing width outside deadband
 
@@ -90,7 +109,7 @@ sign_enforcement:
   tolerance: 1.0e-3
 
 dob:
-  enabled: true
+  enabled: false
   torque_input_mode: applied  # command | applied
   applied_sign: -1.0           # appliedが不安定なら -1.0 で符号補正
   cutoff_hz: 5.0

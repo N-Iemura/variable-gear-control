@@ -38,6 +38,7 @@ class PositionController:
         dt: float,
         derivative_mode: str = "error",
         derivative_filter_alpha: float = 1.0,
+        use_feedforward: bool = True,
     ) -> None:
         self.kp = float(gains.get("kp", 0.0))
         self.ki = float(gains.get("ki", 0.0))
@@ -50,6 +51,7 @@ class PositionController:
         if self.derivative_mode not in {"error", "measurement"}:
             raise ValueError("derivative_mode must be 'error' or 'measurement'")
         self.alpha = max(0.0, min(1.0, float(derivative_filter_alpha)))
+        self.use_feedforward = bool(use_feedforward)
 
         self.integral = 0.0
         self.integral_limit = (
@@ -76,9 +78,12 @@ class PositionController:
         if self.integral_limit < math.inf:
             self.integral = max(-self.integral_limit, min(self.integral_limit, self.integral))
 
-        feedforward = self.inertia * float(command.acceleration) + self.damping * float(
-            command.velocity
-        )
+        if self.use_feedforward:
+            feedforward = self.inertia * float(command.acceleration) + self.damping * float(
+                command.velocity
+            )
+        else:
+            feedforward = 0.0
 
         unsaturated = (
             self.kp * error
@@ -139,6 +144,7 @@ class VelocityController:
         dt: float,
         derivative_mode: str = "error",
         derivative_filter_alpha: float = 1.0,
+        use_feedforward: bool = True,
     ) -> None:
         self.kp = float(gains.get("kp", 0.0))
         self.ki = float(gains.get("ki", 0.0))
@@ -151,6 +157,7 @@ class VelocityController:
         if self.derivative_mode not in {"error", "measurement"}:
             raise ValueError("derivative_mode must be 'error' or 'measurement'")
         self.alpha = max(0.0, min(1.0, float(derivative_filter_alpha)))
+        self.use_feedforward = bool(use_feedforward)
 
         self.integral = 0.0
         self.integral_limit = (
@@ -185,9 +192,12 @@ class VelocityController:
         if self.integral_limit < math.inf:
             self.integral = max(-self.integral_limit, min(self.integral_limit, self.integral))
 
-        feedforward = self.inertia * float(command.acceleration) + self.damping * float(
-            command.velocity
-        )
+        if self.use_feedforward:
+            feedforward = self.inertia * float(command.acceleration) + self.damping * float(
+                command.velocity
+            )
+        else:
+            feedforward = 0.0
 
         unsaturated = (
             self.kp * error

@@ -24,6 +24,7 @@ from position_controller import (
     VelocityController,
 )
 from torque_distribution import TorqueAllocator
+from velocity_distribution import VelocityAllocator
 
 
 _LOGGER = logging.getLogger("main_control")
@@ -434,6 +435,38 @@ class ReferenceGenerator:
         return PositionCommand(float(values[index]))
 
 
+@dataclass
+class TorqueToVelocityConverter:
+    inertia: float
+    damping: float
+    dt: float
+    velocity_limit: float = math.inf
+    accel_limit: float = math.inf
+    use_damping: bool = True
+    use_friction: bool = True
+    omega_ref: float = 0.0
+
+    def reset(self, omega: float = 0.0) -> None:
+        self.omega_ref = float(omega)
+
+    def update(self, tau_out: float, measured_velocity: float, friction_torque: float = 0.0) -> float:
+        if not math.isfinite(self.inertia) or abs(self.inertia) < 1e-9:
+            return self.omega_ref
+        torque_eff = float(tau_out)
+        if self.use_friction:
+            torque_eff -= float(friction_torque)
+        if self.use_damping:
+            torque_eff -= self.damping * float(measured_velocity)
+        accel = torque_eff / self.inertia
+        if math.isfinite(self.accel_limit):
+            accel = max(-self.accel_limit, min(self.accel_limit, accel))
+        omega_next = self.omega_ref + accel * self.dt
+        if math.isfinite(self.velocity_limit):
+            omega_next = max(-self.velocity_limit, min(self.velocity_limit, omega_next))
+        self.omega_ref = omega_next
+        return omega_next
+
+
 def build_modules(config_dir: Path) -> Dict[str, object]:
     controller_cfg = _load_yaml(config_dir / "controller.yaml")
     hardware_cfg = _load_yaml(config_dir / "hardware.yaml")
@@ -453,6 +486,13 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     motor_output_gains = np.asarray(
         plant_cfg.get("motor_output_gains", mechanism_matrix), dtype=float
     )
+    velocity_cfg = controller_cfg.get("velocity_distribution", {})
+    if not isinstance(velocity_cfg, dict):
+        velocity_cfg = {}
+    kinematic_matrix = np.asarray(
+        velocity_cfg.get("kinematic_matrix", plant_cfg.get("kinematic_matrix", mechanism_matrix)),
+        dtype=float,
+    )
     inertia = float(plant_cfg.get("inertia", 0.015))
     damping = float(plant_cfg.get("damping", 0.002))
 
@@ -470,6 +510,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
             dt=dt,
             derivative_mode=derivative_mode,
             derivative_filter_alpha=derivative_alpha,
+            use_feedforward=bool(velocity_pid.get("use_feedforward", True)),
         )
     else:
         controller = PositionController(
@@ -479,6 +520,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
             dt=dt,
             derivative_mode=derivative_mode,
             derivative_filter_alpha=derivative_alpha,
+            use_feedforward=bool(outer_pid.get("use_feedforward", True)),
         )
 
     dob_cfg = controller_cfg.get("dob", {})
@@ -509,6 +551,14 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     sign_cfg = controller_cfg.get("sign_enforcement", {})
     weight_mode = str(allocation_cfg.get("weight_mode", "raw")).lower()
     preference_mode = str(preference_cfg.get("mode", "primary")).lower()
+    velocity_weight_mode = str(velocity_cfg.get("weight_mode", "raw")).lower()
+    velocity_preference_mode = str(
+        velocity_cfg.get("preference_mode", preference_mode)
+    ).lower()
+    velocity_preferred_motor = velocity_cfg.get(
+        "preferred_motor", preference_cfg.get("preferred_motor")
+    )
+    velocity_sign_enforcement = bool(velocity_cfg.get("sign_enforcement", sign_cfg.get("enabled", True)))
 
     allocator = TorqueAllocator(
         mechanism_matrix=mechanism_matrix,
@@ -520,6 +570,17 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         weight_mode=weight_mode,
         preference_mode=preference_mode,
     )
+    velocity_allocator = VelocityAllocator(
+        kinematic_matrix=kinematic_matrix,
+        velocity_limits=velocity_cfg.get("velocity_limits", {}),
+        dt=dt,
+        rate_limits=velocity_cfg.get("velocity_rate_limits", {}),
+        preferred_motor=velocity_preferred_motor,
+        sign_enforcement=velocity_sign_enforcement,
+        weight_mode=velocity_weight_mode,
+        preference_mode=velocity_preference_mode,
+    )
+    direct_velocity = bool(velocity_cfg.get("direct_velocity", False))
 
     assist_cfg = controller_cfg.get("assist_manager", {})
     assist_enabled = bool(assist_cfg.get("enabled", True))
@@ -545,11 +606,24 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     )
 
     odrive_iface = ODriveInterface(hardware)
+    motor_control_mode = str(controller_cfg.get("motor_control_mode", "torque")).lower()
+    odrive_velocity_gains = controller_cfg.get("odrive_velocity_gains", {})
+    tau_to_velocity = TorqueToVelocityConverter(
+        inertia=inertia,
+        damping=damping,
+        dt=dt,
+        velocity_limit=float(velocity_cfg.get("output_velocity_limit", math.inf)),
+        accel_limit=float(velocity_cfg.get("output_accel_limit", math.inf)),
+        use_damping=bool(velocity_cfg.get("use_damping_comp", True)),
+        use_friction=bool(velocity_cfg.get("use_friction_comp", True)),
+    )
 
     return {
         "controller": controller,
         "dob": dob,
         "allocator": allocator,
+        "velocity_allocator": velocity_allocator,
+        "tau_to_velocity": tau_to_velocity,
         "assist": assist_manager,
         "reference": reference,
         "logger": logger,
@@ -561,9 +635,13 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         "command_type": command_type,
         "mechanism_matrix": mechanism_matrix,
         "motor_output_gains": motor_output_gains,
+        "kinematic_matrix": kinematic_matrix,
         "dob_enabled": dob_enabled,
         "dob_input_mode": dob_input_mode,
         "dob_applied_sign": dob_applied_sign,
+        "motor_control_mode": motor_control_mode,
+        "odrive_velocity_gains": odrive_velocity_gains,
+        "direct_velocity": direct_velocity,
     }
 
 
@@ -574,12 +652,18 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     dob_input_mode: str = modules.get("dob_input_mode", "command")
     dob_applied_sign: float = float(modules.get("dob_applied_sign", 1.0))
     allocator: TorqueAllocator = modules["allocator"]
+    velocity_allocator: VelocityAllocator = modules["velocity_allocator"]
+    tau_to_velocity: TorqueToVelocityConverter = modules["tau_to_velocity"]
+    direct_velocity = bool(modules.get("direct_velocity", False))
     assist_manager: Optional[AssistManager] = modules["assist"]
     reference: ReferenceGenerator = modules["reference"]
     logger: DataLogger = modules["logger"]
     odrive_iface: ODriveInterface = modules["odrive"]
     dt: float = modules["dt"]
     command_type = str(modules.get("command_type", "position")).lower()
+    motor_control_mode = str(modules.get("motor_control_mode", "torque")).lower()
+    if motor_control_mode not in {"torque", "velocity"}:
+        raise ValueError("motor_control_mode must be 'torque' or 'velocity'")
     mechanism_matrix = np.asarray(modules.get("mechanism_matrix"), dtype=float)
     motor_output_gains = np.asarray(
         modules.get("motor_output_gains", mechanism_matrix), dtype=float
@@ -610,7 +694,33 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             return math.copysign(coulomb, direction)
         return coulomb * math.tanh(vel / blend_width)
 
-    odrive_iface.connect(calibrate=False)
+    odrive_iface.connect(calibrate=False, control_mode=motor_control_mode)
+    if motor_control_mode == "velocity":
+        if command_type == "position":
+            _LOGGER.warning(
+                "motor_control_mode is velocity but command_type is position; "
+                "verify outer-loop behavior."
+            )
+        if direct_velocity and command_type != "velocity":
+            _LOGGER.warning(
+                "direct_velocity is enabled but command_type is not velocity; "
+                "falling back to torque-to-velocity conversion."
+            )
+        gains_cfg = modules.get("odrive_velocity_gains", {})
+        if isinstance(gains_cfg, dict):
+            for name, gains in gains_cfg.items():
+                if not isinstance(gains, dict):
+                    continue
+                applied = odrive_iface.set_velocity_gains(
+                    name,
+                    vel_gain=gains.get("vel_gain"),
+                    vel_integrator_gain=gains.get("vel_integrator_gain"),
+                    vel_integrator_limit=gains.get("vel_integrator_limit"),
+                )
+                if applied:
+                    _LOGGER.info("ODrive velocity gains applied on %s: %s", name, applied)
+        if dob_enabled and dob_input_mode == "applied":
+            _LOGGER.info("DOB is enabled with applied torque input in velocity mode.")
     odrive_iface.zero_positions()
     _LOGGER.info("Control loop started (dt=%.6f s)", dt)
 
@@ -729,7 +839,22 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             tau_alloc, alloc_diag = allocator.allocate(tau_aug, weights, secondary_gain)
             # 次周期のDOB入力用に、今回送ったモータ指令を保存
             prev_tau_alloc = tau_alloc.copy()
-            odrive_iface.command_torques(float(tau_alloc[0]), float(tau_alloc[1]))
+            if motor_control_mode == "velocity":
+                if direct_velocity and command_type == "velocity":
+                    omega_out_ref = float(reference_velocity)
+                    vel_limit = float(getattr(tau_to_velocity, "velocity_limit", math.inf))
+                    if math.isfinite(vel_limit):
+                        omega_out_ref = max(-vel_limit, min(vel_limit, omega_out_ref))
+                else:
+                    omega_out_ref = tau_to_velocity.update(
+                        tau_aug, output_state.velocity, friction_torque=friction_tau
+                    )
+                omega_alloc, _ = velocity_allocator.allocate(
+                    omega_out_ref, weights, secondary_gain
+                )
+                odrive_iface.command_velocities(float(omega_alloc[0]), float(omega_alloc[1]))
+            else:
+                odrive_iface.command_torques(float(tau_alloc[0]), float(tau_alloc[1]))
             t_ctrl_end = time.perf_counter()
 
             motor1_state = states["motor1"]
@@ -775,6 +900,8 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
         metadata = {
             "DurationSec": f"{time.time() - start_time:.3f}",
             "SampleTime": f"{dt}",
+            "MotorControlMode": motor_control_mode,
+            "DirectVelocity": str(bool(direct_velocity)),
         }
         if loop_intervals:
             metadata.update(
