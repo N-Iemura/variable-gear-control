@@ -6,6 +6,11 @@ motor_control_mode: torque  # torque | velocity
 torque_allocation:
   weight_mode: raw  # torque_utilization | raw
 
+torque_distribution:
+  mode: dynamic  # dynamic | fixed
+  fixed_weights: [1.0, 1.0]
+  fixed_secondary_gain: 1.0
+
 plant:
   inertia: 0.009967215896643318
   damping: 8.172049793342932

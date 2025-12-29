@@ -547,6 +547,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     torque_limits = controller_cfg.get("torque_limits", {})
     rate_limits = controller_cfg.get("torque_rate_limits", {})
     allocation_cfg = controller_cfg.get("torque_allocation", {})
+    torque_dist_cfg = controller_cfg.get("torque_distribution", {})
     preference_cfg = controller_cfg.get("torque_preference", {})
     sign_cfg = controller_cfg.get("sign_enforcement", {})
     weight_mode = str(allocation_cfg.get("weight_mode", "raw")).lower()
@@ -639,6 +640,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         "dob_enabled": dob_enabled,
         "dob_input_mode": dob_input_mode,
         "dob_applied_sign": dob_applied_sign,
+        "torque_distribution": torque_dist_cfg,
         "motor_control_mode": motor_control_mode,
         "odrive_velocity_gains": odrive_velocity_gains,
         "direct_velocity": direct_velocity,
@@ -668,6 +670,12 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     motor_output_gains = np.asarray(
         modules.get("motor_output_gains", mechanism_matrix), dtype=float
     )
+    torque_dist_cfg = modules.get("torque_distribution", {}) or {}
+    dist_mode = str(torque_dist_cfg.get("mode", "dynamic")).lower()
+    fixed_weights = np.asarray(torque_dist_cfg.get("fixed_weights", [1.0, 1.0]), dtype=float)
+    fixed_secondary_gain = float(torque_dist_cfg.get("fixed_secondary_gain", 1.0))
+    if fixed_weights.shape != (2,) or np.any(fixed_weights <= 0.0):
+        raise ValueError("torque_distribution.fixed_weights must be two positive values.")
     friction_cfg = modules.get("friction_ff", {}) or {}
     use_measured_torque = dob_enabled and dob_input_mode == "applied"
     measured_tau = np.zeros(2, dtype=float)
@@ -828,13 +836,19 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 tau_aug = tau_cmd
                 dob_diag = {"filtered_disturbance": 0.0}
 
-            if assist_manager is not None:
-                assist_status = assist_manager.update(tau_aug)
-                weights = assist_status.weights
-                secondary_gain = assist_status.secondary_gain
+            if dist_mode == "fixed":
+                weights = fixed_weights
+                secondary_gain = fixed_secondary_gain
+            elif dist_mode == "dynamic":
+                if assist_manager is not None:
+                    assist_status = assist_manager.update(tau_aug)
+                    weights = assist_status.weights
+                    secondary_gain = assist_status.secondary_gain
+                else:
+                    weights = np.ones(2, dtype=float)
+                    secondary_gain = 1.0
             else:
-                weights = np.ones(2, dtype=float)
-                secondary_gain = 1.0
+                raise ValueError("torque_distribution.mode must be 'fixed' or 'dynamic'.")
 
             tau_alloc, alloc_diag = allocator.allocate(tau_aug, weights, secondary_gain)
             # 次周期のDOB入力用に、今回送ったモータ指令を保存
