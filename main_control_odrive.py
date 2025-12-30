@@ -551,6 +551,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     preference_cfg = controller_cfg.get("torque_preference", {})
     sign_cfg = controller_cfg.get("sign_enforcement", {})
     weight_mode = str(allocation_cfg.get("weight_mode", "raw")).lower()
+    dynamic_utilization = bool(allocation_cfg.get("dynamic_utilization", True))
     preference_mode = str(preference_cfg.get("mode", "primary")).lower()
     velocity_weight_mode = str(velocity_cfg.get("weight_mode", "raw")).lower()
     velocity_preference_mode = str(
@@ -570,6 +571,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         sign_enforcement=sign_cfg.get("enabled", True),
         weight_mode=weight_mode,
         preference_mode=preference_mode,
+        dynamic_utilization=dynamic_utilization,
     )
     velocity_allocator = VelocityAllocator(
         kinematic_matrix=kinematic_matrix,
@@ -737,7 +739,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
         poll_interval = max(0.0005, dt)  # do not spin too fast
         while not stop_measured_torque.is_set():
             try:
-                poll_states = odrive_iface.read_states(fast=False)
+                poll_states = odrive_iface.read_states(fast=True)
                 with measured_tau_lock:
                     measured_tau[0] = poll_states["motor1"].torque_measured
                     measured_tau[1] = poll_states["motor2"].torque_measured

@@ -105,6 +105,7 @@ class TorqueAllocator:
         sign_enforcement: bool = True,
         weight_mode: str = "raw",
         preference_mode: str = "primary",
+        dynamic_utilization: bool = True,
     ) -> None:
         self.A = np.asarray(mechanism_matrix, dtype=float).reshape(1, 2)
         self.torque_limits = np.array(
@@ -124,6 +125,7 @@ class TorqueAllocator:
         self.sign_enforcement = bool(sign_enforcement)
         self.weight_mode = str(weight_mode).lower()
         self.preference_mode = str(preference_mode).lower()
+        self.dynamic_utilization = bool(dynamic_utilization)
         self.prev_tau = np.zeros(2, dtype=float)
 
     def reset(self) -> None:
@@ -166,11 +168,29 @@ class TorqueAllocator:
         weights = np.asarray(weights, dtype=float).reshape(2)
         if np.any(weights <= 0.0):
             raise ValueError("weights must be strictly positive")
+        
         if self.weight_mode == "torque_utilization":
             if np.any(self.torque_limits <= 0.0):
                 raise ValueError("Torque limits must be positive for utilization weighting.")
-            scale = self.torque_limits ** 2
-            return weights / scale
+            
+            base_scale = self.torque_limits ** 2
+
+            if not self.dynamic_utilization:
+                return weights / base_scale
+
+            # Calculate current utilization based on previous torque command
+            # util = |tau| / limit
+            util = np.abs(self.prev_tau) / (self.torque_limits + 1e-9)
+            # Clip utilization to [0, 0.99] to avoid division by zero in barrier
+            util = np.clip(util, 0.0, 0.99)
+            
+            # Barrier function: weight increases as utilization approaches 1.0
+            # Base weight: 1 / Limit^2 (Standard utilization balancing)
+            # Dynamic factor: 1 / (1 - util)^2
+            barrier_factor = 1.0 / ((1.0 - util) ** 2 + 1e-6)
+            
+            return weights / base_scale * barrier_factor
+            
         return weights
 
     def _enforce_rate_limits(self, tau: np.ndarray) -> np.ndarray:

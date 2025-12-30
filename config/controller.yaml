@@ -1,39 +1,59 @@
-control_frequency_hz: 200
-sample_time_s: 0.005
-command_type: position  # position | velocity
-motor_control_mode: torque  # torque | velocity
+# ==========================================
+# 基本制御設定
+# ==========================================
+control_frequency_hz: 200  # 制御ループ周波数 [Hz]
+sample_time_s: 0.005       # サンプリング時間 [s] (1/frequency)
+command_type: position     # 上位からの指令タイプ: position | velocity
+motor_control_mode: torque # モータへの指令モード: torque | velocity
 
+# ==========================================
+# トルク配分設定 (Torque Allocation)
+# ==========================================
 torque_allocation:
-  weight_mode: raw  # torque_utilization | raw
+  # raw: 指定された重みをそのまま使用
+  # torque_utilization: トルク制限に対する使用率を均等化するように重みを調整 (limitが小さいモータは使われにくくなる)
+  weight_mode: torque_utilization  # torque_utilization | raw
+
+  # true (on): バリア関数による動的重み (1/(1-u)^2) - 制限に近づくと急激に重くなる
+  # false (off): 制限値の逆二乗に基づく固定重み (1/limit^2)
+  dynamic_utilization: false
 
 torque_distribution:
+  # dynamic: assist_manager等の計算結果に基づいて重みを動的に変更
+  # fixed: 下記の fixed_weights を常に使用
   mode: dynamic  # dynamic | fixed
   fixed_weights: [1.0, 1.0]
   fixed_secondary_gain: 1.0
 
+# ==========================================
+# プラントモデル (Plant Model)
+# ==========================================
 plant:
-  inertia: 0.009967215896643318
-  damping: 8.172049793342932
-  # inertia: 0.0
-  # damping: 0.0
+  inertia: 0.009967215896643318  # システム全体の慣性モーメント [kg m^2]
+  damping: 8.172049793342932     # システム全体の粘性摩擦係数 [Nm s/rad]
+  # 機構行列: モータトルク [tau1, tau2] から出力トルク tau_out への変換行列
+  # tau_out = A @ [tau1, tau2]^T
   mechanism_matrix: [-20.0, 12.26993865]
   motor_output_gains: [-20.0, 12.26993865]
 
-outer_pid:
-  kp: 10.00
-  ki: 10.0
-  kd: 2.0
+# ==========================================
+# PID制御ゲイン
+# ==========================================
+outer_pid:  # 位置制御ループ (Position -> Velocity)
+  kp: 40.00
+  ki: 20.0
+  kd: 1.0
   use_feedforward: true
   max_output: 100.0
 
-velocity_pid:
+velocity_pid:  # 速度制御ループ (Velocity -> Torque/Force)
   kp: 0.5
   ki: 0.0
   kd: 0.0
   use_feedforward: false
   max_output: 50.0
 
-per_motor_pid:
+per_motor_pid:  # 各モータごとのマイナーループ (オプション)
   enable_outer_loop: true
   derivative_mode: measurement
   derivative_filter_alpha: 0.05
@@ -48,40 +68,56 @@ per_motor_pid:
     kd: 0.05
     max_output: 0.2
 
+# ==========================================
+# アシスト制御マネージャ (Assist Manager)
+# ==========================================
 assist_manager:
   enabled: true
-  mode: balanced  # balanced: use both motors; threshold: primary-first with activation thresholds
+  # balanced: 常に両方のモータを使用
+  # threshold: 負荷に応じて副モータ(Motor2)の使用を切り替え
+  mode: threshold
   primary_motor: motor1
-  release_start_ratio: 0.5
-  release_full_ratio: 0.9
+
+  # アシスト開始・終了の遷移設定 (負荷率 0.0~1.0 に対して)
+  release_start_ratio: 0.2  # この負荷率を超えるとMotor2が徐々に参加開始
+  release_full_ratio: 0.2   # この負荷率でMotor2が完全に最大参加状態になる
+
+  # 強制切り替え閾値 (ヒステリシス付き)
   torque_thresholds:
-    activate: 0.6
-    deactivate: 0.5
+    activate: 0.4    # 負荷率がこれを超えると即座にMotor2 ON
+    deactivate: 0.3  # 負荷率がこれを下回るとMotor2 OFF
+
+  # 状態ごとの重み付け (小さいほど優先的に使われる)
   weighting:
-    hold:
+    hold:  # Motor2 OFF時 (Motor1のみ使用)
       motor1: 1.0
-      motor2: 100000.0
-    release:
-      motor1: 0.1666666667
-      motor2: 0.016667
+      motor2: 100000.0  # Motor2のコストを極大にして使わせない
+    release:  # Motor2 ON時 (両方使用)
+      motor1: 1.0
+      motor2: 1.0
+
   secondary_gain:
-    hold: 0.0
-    release: 1.0
+    hold: 0.0     # OFF時のMotor2ゲイン係数
+    release: 1.0  # ON時のMotor2ゲイン係数
+
   weight_limits:
     w_off: 100000.0
     w_on: 1.0
-  time_constant: 0.05
+  time_constant: 0.05  # 遷移の時定数 [s]
 
+# ==========================================
+# その他の設定
+# ==========================================
 torque_preference:
-  mode: balanced  # primary: prefer one motor, balanced: no preference
+  mode: primary  # primary: prefer one motor, balanced: no preference
   preferred_motor: motor1
   secondary_gain: 0.0
 
-torque_limits:
-  motor1: 6.0
-  motor2: 0.5
+torque_limits:  # 各モータの最大トルク [Nm]
+  motor1: 2.0
+  motor2: 0.4
 
-torque_rate_limits:
+torque_rate_limits:  # トルク変化率制限 [Nm/s]
   motor1: 100.0
   motor2: 100.0
 
@@ -110,15 +146,15 @@ freeze:
   kd: 0.002
 
 sign_enforcement:
-  enabled: true
+  enabled: false
   tolerance: 1.0e-3
 
 dob:
-  enabled: false
-  torque_input_mode: applied  # command | applied
+  enabled: true
+  torque_input_mode: command  # command | applied
   applied_sign: -1.0           # appliedが不安定なら -1.0 で符号補正
-  cutoff_hz: 5.0
-  use_damping: false
+  cutoff_hz: 20.0
+  use_damping: true
 
 identification:
   initial_wait: 1.0        # [s] idle before ramp starts
@@ -129,3 +165,34 @@ identification:
   rest_duration: 2.0       # [s] stay at 0 torque after cycle
   repeat: true             # true to loop the pattern
   motor_freeze: motor2     # motor to keep at 0 torque during experiment
+
+# ==========================================
+# 従来手法 (Conventional Method) 設定
+# ==========================================
+conventional:
+  # Motor 2 (副モータ) の速度制御設定
+  motor2_velocity:
+    # constant: 一定速度 (valueを使用)
+    # adaptive: Motor1の利用率に応じて速度を変更 (threshold, velocity_ratioを使用)
+    mode: adaptive  # constant | adaptive
+    value: 0.0      # [turn/s] constant mode value
+    
+    # Adaptive Mode Settings
+    utilization_threshold: 0.2  # Motor1の利用率がこれを超えたらMotor2を動かす
+    target_velocity: 5.0        # [turn/s] Motor2の目標速度 (減速比変更量に相当)
+    hysteresis: 0.1             # 閾値のヒステリシス幅
+
+  # Motor 2 の速度制御PIDゲイン (Velocity -> Torque)
+  motor2_pid:
+    kp: 0.05
+    ki: 0.0
+    kd: 0.0
+    max_output: 0.4  # Motor2のトルク制限に合わせる
+
+  # Motor 1 (主モータ) の位置制御PIDゲイン (従来手法用)
+  motor1_pid:
+    kp: 0.05
+    ki: 0.0
+    kd: 0.0
+    use_feedforward: true
+    max_output: 100.0
