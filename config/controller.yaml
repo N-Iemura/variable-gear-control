@@ -170,6 +170,17 @@ identification:
 # 従来手法 (Conventional Method) 設定
 # ==========================================
 conventional:
+  # 以下の設定は、グローバル設定を上書きできます (オプション)
+  # plant: ...
+  # dob: ...
+  # torque_limits: ...
+  dob:
+  enabled: true
+  torque_input_mode: command  # command | applied
+  applied_sign: -1.0           # appliedが不安定なら -1.0 で符号補正
+  cutoff_hz: 20.0
+  use_damping: true
+
   # Motor 2 (副モータ) の速度制御設定
   motor2_velocity:
     # constant: 一定速度 (valueを使用)
@@ -184,14 +195,14 @@ conventional:
 
   # Motor 2 の速度制御PIDゲイン (Velocity -> Torque)
   motor2_pid:
-    kp: 0.05
+    kp: 0.01
     ki: 0.0
     kd: 0.0
     max_output: 0.4  # Motor2のトルク制限に合わせる
 
   # Motor 1 (主モータ) の位置制御PIDゲイン (従来手法用)
   motor1_pid:
-    kp: 0.05
+    kp: 2.0
     ki: 0.0
     kd: 0.0
     use_feedforward: true

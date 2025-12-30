@@ -473,6 +473,9 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     reference_cfg = _load_yaml(config_dir / "reference.yaml")
     logger_cfg = _load_yaml(config_dir / "logger.yaml")
 
+    # Conventional Config (Extract early to allow overrides)
+    conventional_cfg = controller_cfg.get("conventional", {})
+
     command_type = str(
         controller_cfg.get("command_type", reference_cfg.get("command_type", "position"))
     ).lower()
@@ -481,7 +484,10 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     reference_cfg["command_type"] = command_type
 
     dt = float(controller_cfg.get("sample_time_s", 0.005))
-    plant_cfg = controller_cfg.get("plant", {})
+    
+    # Allow overriding plant config
+    plant_cfg = conventional_cfg.get("plant", controller_cfg.get("plant", {}))
+    
     mechanism_matrix = np.asarray(plant_cfg.get("mechanism_matrix", [-0.05, 0.0815]))
     motor_output_gains = np.asarray(
         plant_cfg.get("motor_output_gains", mechanism_matrix), dtype=float
@@ -523,7 +529,9 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
             use_feedforward=bool(outer_pid.get("use_feedforward", True)),
         )
 
-    dob_cfg = controller_cfg.get("dob", {})
+    # Allow overriding DOB config
+    dob_cfg = conventional_cfg.get("dob", controller_cfg.get("dob", {}))
+    
     dob_enabled = bool(dob_cfg.get("enabled", True))
     dob_input_mode = str(dob_cfg.get("torque_input_mode", "command")).lower()
     dob_applied_sign = float(
@@ -544,7 +552,9 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     else:
         dob = None
 
-    torque_limits = controller_cfg.get("torque_limits", {})
+    # Allow overriding torque limits
+    torque_limits = conventional_cfg.get("torque_limits", controller_cfg.get("torque_limits", {}))
+    
     rate_limits = controller_cfg.get("torque_rate_limits", {})
     allocation_cfg = controller_cfg.get("torque_allocation", {})
     torque_dist_cfg = controller_cfg.get("torque_distribution", {})
@@ -612,8 +622,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     motor_control_mode = str(controller_cfg.get("motor_control_mode", "torque")).lower()
     odrive_velocity_gains = controller_cfg.get("odrive_velocity_gains", {})
     
-    # Conventional Config
-    conventional_cfg = controller_cfg.get("conventional", {})
+    # Conventional Config (Already extracted at top)
     motor1_pid = conventional_cfg.get("motor1_pid", outer_pid)
     
     # Override controller for conventional mode
