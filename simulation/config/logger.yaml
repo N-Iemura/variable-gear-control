@@ -1,0 +1,6 @@
+csv_dir: csv
+figure_dir: fig
+data_filename_prefix: dob
+plot_filename_suffix: .pdf
+filename_command_values: null
+filename_decimals: 4
