@@ -18,6 +18,11 @@ torque_allocation:
   # false (off): 制限値の逆二乗に基づく固定重み (1/limit^2)
   dynamic_utilization: false
 
+  # 重みのローパス設定 (実効重みを平滑化)
+  # weight_filter_tau: 時定数 [s] (0 or 未設定で無効)
+  # weight_filter_alpha: 0-1 (tauより優先。1でフィルタ無し)
+  weight_filter_tau: 0.2
+
 torque_distribution:
   # dynamic: assist_manager等の計算結果に基づいて重みを動的に変更
   # fixed: 下記の fixed_weights を常に使用
@@ -40,11 +45,11 @@ plant:
 # PID制御ゲイン
 # ==========================================
 outer_pid:  # 位置制御ループ (Position -> Velocity)
-  kp: 40.00
-  ki: 20.0
-  kd: 1.0
+  kp: 200.00
+  ki: 100.0
+  kd: 20.0
   use_feedforward: true
-  max_output: 100.0
+  max_output: 200.0
 
 velocity_pid:  # 速度制御ループ (Velocity -> Torque/Force)
   kp: 0.5
@@ -72,7 +77,7 @@ per_motor_pid:  # 各モータごとのマイナーループ (オプション)
 # アシスト制御マネージャ (Assist Manager)
 # ==========================================
 assist_manager:
-  enabled: true
+  enabled: false
   # balanced: 常に両方のモータを使用
   # threshold: 負荷に応じて副モータ(Motor2)の使用を切り替え
   mode: threshold
@@ -114,7 +119,7 @@ torque_preference:
   secondary_gain: 0.0
 
 torque_limits:  # 各モータの最大トルク [Nm]
-  motor1: 2.0
+  motor1: 3.0
   motor2: 0.5
 
 torque_rate_limits:  # トルク変化率制限 [Nm/s]
@@ -150,7 +155,7 @@ sign_enforcement:
   tolerance: 1.0e-3
 
 dob:
-  enabled: true
+  enabled: false
   torque_input_mode: command  # command | applied
   applied_sign: -1.0           # appliedが不安定なら -1.0 で符号補正
   cutoff_hz: 0.0

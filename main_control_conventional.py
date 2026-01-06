@@ -582,6 +582,8 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         weight_mode=weight_mode,
         preference_mode=preference_mode,
         dynamic_utilization=dynamic_utilization,
+        weight_filter_tau=allocation_cfg.get("weight_filter_tau"),
+        weight_filter_alpha=allocation_cfg.get("weight_filter_alpha"),
     )
     velocity_allocator = VelocityAllocator(
         kinematic_matrix=kinematic_matrix,

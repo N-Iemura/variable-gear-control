@@ -106,6 +106,8 @@ class TorqueAllocator:
         weight_mode: str = "raw",
         preference_mode: str = "primary",
         dynamic_utilization: bool = True,
+        weight_filter_tau: float | None = None,
+        weight_filter_alpha: float | None = None,
     ) -> None:
         self.A = np.asarray(mechanism_matrix, dtype=float).reshape(1, 2)
         self.torque_limits = np.array(
@@ -126,10 +128,15 @@ class TorqueAllocator:
         self.weight_mode = str(weight_mode).lower()
         self.preference_mode = str(preference_mode).lower()
         self.dynamic_utilization = bool(dynamic_utilization)
+        self.weight_filter_alpha = self._resolve_weight_filter_alpha(
+            weight_filter_alpha, weight_filter_tau
+        )
+        self.filtered_weights: np.ndarray | None = None
         self.prev_tau = np.zeros(2, dtype=float)
 
     def reset(self) -> None:
         self.prev_tau[:] = 0.0
+        self.filtered_weights = None
 
     def allocate(
         self,
@@ -139,6 +146,7 @@ class TorqueAllocator:
     ) -> Tuple[np.ndarray, Dict[str, float]]:
         weights = np.asarray(weights, dtype=float).reshape(2)
         eff_weights = self._effective_weights(weights)
+        eff_weights = self._smooth_weights(eff_weights)
         tau_preferred = min_norm_torque_split(self.A, tau_out, eff_weights)
         tau_preferred = self._apply_preference(tau_preferred, secondary_gain)
         tau_solution = _solve_with_limits(
@@ -192,6 +200,36 @@ class TorqueAllocator:
             return weights / base_scale * barrier_factor
             
         return weights
+
+    def _resolve_weight_filter_alpha(
+        self, alpha: float | None, tau: float | None
+    ) -> float | None:
+        if alpha is not None:
+            alpha = float(alpha)
+            if not math.isfinite(alpha):
+                raise ValueError("weight_filter_alpha must be finite")
+            if alpha <= 0.0:
+                return None
+            return min(1.0, alpha)
+        if tau is None:
+            return None
+        tau = float(tau)
+        if not math.isfinite(tau):
+            raise ValueError("weight_filter_tau must be finite")
+        if tau <= 0.0:
+            return None
+        return self.dt / (tau + self.dt)
+
+    def _smooth_weights(self, weights: np.ndarray) -> np.ndarray:
+        weights = np.asarray(weights, dtype=float).reshape(2)
+        alpha = self.weight_filter_alpha
+        if alpha is None:
+            return weights
+        if self.filtered_weights is None:
+            self.filtered_weights = weights.copy()
+            return weights
+        self.filtered_weights += alpha * (weights - self.filtered_weights)
+        return self.filtered_weights.copy()
 
     def _enforce_rate_limits(self, tau: np.ndarray) -> np.ndarray:
         tau = np.asarray(tau, dtype=float).reshape(2).copy()

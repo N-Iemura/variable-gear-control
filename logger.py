@@ -308,22 +308,24 @@ class DataLogger:
 
         axes[2].plot(time_data, tau_1, "-", color="tab:blue", label=r"$\tau_1$")
         axes[2].plot(time_data, tau_2, "-", color="tab:red", label=r"$\tau_2$")
-        axes[2].plot(
-            time_data,
-            tau_from_iq1,
-            "--",
-            color="tab:blue",
-            alpha=0.8,
-            label=r"$\tau_{iq,1}$",
-        )
-        axes[2].plot(
-            time_data,
-            tau_from_iq2,
-            "--",
-            color="tab:red",
-            alpha=0.8,
-            label=r"$\tau_{iq,2}$",
-        )
+        if abs(kt1) > 1e-9:
+            axes[2].plot(
+                time_data,
+                tau_from_iq1,
+                "--",
+                color="tab:blue",
+                alpha=0.8,
+                label=r"$\tau_{iq,1}$",
+            )
+        if abs(kt2) > 1e-9:
+            axes[2].plot(
+                time_data,
+                tau_from_iq2,
+                "--",
+                color="tab:red",
+                alpha=0.8,
+                label=r"$\tau_{iq,2}$",
+            )
         axes[2].set_ylabel(r"$\tau$ [Nm]")
         axes[2].set_xlabel("Time [s]")
         axes[2].legend(loc="upper right")

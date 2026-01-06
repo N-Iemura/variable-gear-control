@@ -328,16 +328,47 @@ class ReferenceGenerator:
         offset = float(cfg.get("offset", 0.0))
         if t < wait:
             return PositionCommand(offset)
-        tau = t - wait
+        tau_raw = t - wait
+        window = str(cfg.get("window", "none")).lower()
+        ramp = float(cfg.get("window_ramp_duration", 0.0))
+        if ramp > 0.0:
+            ramp = min(ramp, duration)
+        tau = tau_raw
         k = (f1 - f0) / duration
         if tau > duration:
             tau = duration
         phase = 2.0 * math.pi * (f0 * tau + 0.5 * k * tau**2)
         freq_inst = f0 + k * tau
         omega = 2.0 * math.pi * freq_inst
-        position = offset + amp * math.sin(phase)
-        velocity = amp * omega * math.cos(phase)
-        acceleration = -amp * (omega**2) * math.sin(phase)
+        envelope = 1.0
+        envelope_dot = 0.0
+        envelope_ddot = 0.0
+        if ramp > 0.0 and tau_raw < ramp:
+            ratio = max(0.0, min(1.0, tau_raw / ramp))
+            if window in {"hann", "cosine"}:
+                angle = math.pi * ratio
+                envelope = 0.5 * (1.0 - math.cos(angle))
+                envelope_dot = 0.5 * math.sin(angle) * math.pi / ramp
+                envelope_ddot = 0.5 * math.cos(angle) * (math.pi**2) / (ramp**2)
+            elif window in {"smootherstep", "smoothstep5", "c2"}:
+                r2 = ratio * ratio
+                r3 = r2 * ratio
+                r4 = r3 * ratio
+                r5 = r4 * ratio
+                envelope = 6.0 * r5 - 15.0 * r4 + 10.0 * r3
+                de_dr = 30.0 * r4 - 60.0 * r3 + 30.0 * r2
+                d2e_dr2 = 120.0 * r3 - 180.0 * r2 + 60.0 * ratio
+                envelope_dot = de_dr / ramp
+                envelope_ddot = d2e_dr2 / (ramp**2)
+        sin_phase = math.sin(phase)
+        cos_phase = math.cos(phase)
+        position = offset + amp * envelope * sin_phase
+        velocity = amp * (envelope_dot * sin_phase + envelope * cos_phase * omega)
+        acceleration = amp * (
+            envelope_ddot * sin_phase
+            + 2.0 * envelope_dot * cos_phase * omega
+            + envelope * (-sin_phase * (omega**2) + cos_phase * (2.0 * math.pi * k))
+        )
         return PositionCommand(position, velocity, acceleration)
 
     def _ramp(self, cfg: Dict[str, object], t: float) -> PositionCommand:
@@ -572,6 +603,8 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         weight_mode=weight_mode,
         preference_mode=preference_mode,
         dynamic_utilization=dynamic_utilization,
+        weight_filter_tau=allocation_cfg.get("weight_filter_tau"),
+        weight_filter_alpha=allocation_cfg.get("weight_filter_alpha"),
     )
     velocity_allocator = VelocityAllocator(
         kinematic_matrix=kinematic_matrix,

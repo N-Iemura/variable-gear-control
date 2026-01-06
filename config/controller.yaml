@@ -18,6 +18,11 @@ torque_allocation:
   # false (off): 制限値の逆二乗に基づく固定重み (1/limit^2)
   dynamic_utilization: false
 
+  # 重みのローパス設定 (実効重みを平滑化)
+  # weight_filter_tau: 時定数 [s] (0 or 未設定で無効)
+  # weight_filter_alpha: 0-1 (tauより優先。1でフィルタ無し)
+  weight_filter_tau: 0.0
+
 torque_distribution:
   # dynamic: assist_manager等の計算結果に基づいて重みを動的に変更
   # fixed: 下記の fixed_weights を常に使用

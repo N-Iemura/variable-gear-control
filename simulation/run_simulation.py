@@ -41,7 +41,7 @@ def _default_duration(reference_cfg: Dict[str, object]) -> float:
     cfg = reference_cfg.get(profile, {}) if isinstance(reference_cfg.get(profile), dict) else {}
     wait = float(cfg.get("initial_wait", 0.0))
     if profile == "chirp":
-        return wait + float(cfg.get("duration", 10.0)) + 1.0
+        return wait + float(cfg.get("duration", 10.0)) + float(cfg.get("post_duration", 0.0))
     if profile == "ramp":
         return wait + float(cfg.get("ramp_duration", 1.0)) + float(
             cfg.get("hold_duration", 0.0)
@@ -180,6 +180,8 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
         weight_mode=str(allocation_cfg.get("weight_mode", "raw")).lower(),
         preference_mode=str(preference_cfg.get("mode", "primary")).lower(),
         dynamic_utilization=bool(allocation_cfg.get("dynamic_utilization", False)),
+        weight_filter_tau=allocation_cfg.get("weight_filter_tau"),
+        weight_filter_alpha=allocation_cfg.get("weight_filter_alpha"),
     )
 
     dist_mode = str(torque_dist_cfg.get("mode", "fixed")).lower()

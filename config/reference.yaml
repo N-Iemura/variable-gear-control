@@ -20,7 +20,10 @@ chirp:
   start_frequency_hz: 0.5
   end_frequency_hz: 5.0      # 高周波まで回す
   duration: 10.0
+  post_duration: 0.0         # [s] chirp終了後にログを伸ばす時間
   offset: 0.0
+  window: smootherstep
+  window_ramp_duration: 0.5  # [s] 窓関数の立ち上げ時間
 
 ramp:
   initial_wait: 1.0
