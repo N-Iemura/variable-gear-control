@@ -276,11 +276,6 @@ class DataLogger:
         omega_ref_deg = turn_to_deg(omega_ref)
         omega_out_deg = turn_to_deg(output_vel)
 
-        kt1 = float(self.torque_constants.get("motor1", 0.0))
-        kt2 = float(self.torque_constants.get("motor2", 0.0))
-        tau_from_iq1 = iq_1 * kt1
-        tau_from_iq2 = iq_2 * kt2
-
         if self.command_type == "velocity":
             axes[0].plot(time_data, omega_ref_deg, "--", label=r"$\omega_{\mathrm{ref}}$")
             axes[0].plot(time_data, omega_out_deg, "-", label=r"$\omega_{\mathrm{out}}$")
@@ -308,24 +303,6 @@ class DataLogger:
 
         axes[2].plot(time_data, tau_1, "-", color="tab:blue", label=r"$\tau_1$")
         axes[2].plot(time_data, tau_2, "-", color="tab:red", label=r"$\tau_2$")
-        if abs(kt1) > 1e-9:
-            axes[2].plot(
-                time_data,
-                tau_from_iq1,
-                "--",
-                color="tab:blue",
-                alpha=0.8,
-                label=r"$\tau_{iq,1}$",
-            )
-        if abs(kt2) > 1e-9:
-            axes[2].plot(
-                time_data,
-                tau_from_iq2,
-                "--",
-                color="tab:red",
-                alpha=0.8,
-                label=r"$\tau_{iq,2}$",
-            )
         axes[2].set_ylabel(r"$\tau$ [Nm]")
         axes[2].set_xlabel("Time [s]")
         axes[2].legend(loc="upper right")

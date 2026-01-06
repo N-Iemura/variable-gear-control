@@ -623,6 +623,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     odrive_iface = ODriveInterface(hardware)
     motor_control_mode = str(controller_cfg.get("motor_control_mode", "torque")).lower()
     odrive_velocity_gains = controller_cfg.get("odrive_velocity_gains", {})
+    odrive_read_fast = bool(controller_cfg.get("odrive_read_fast", True))
     
     # Conventional Config (Already extracted at top)
     motor1_pid = conventional_cfg.get("motor1_pid", outer_pid)
@@ -673,6 +674,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         "torque_distribution": torque_dist_cfg,
         "motor_control_mode": motor_control_mode,
         "odrive_velocity_gains": odrive_velocity_gains,
+        "odrive_read_fast": odrive_read_fast,
         "direct_velocity": direct_velocity,
     }
 
@@ -691,6 +693,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     reference: ReferenceGenerator = modules["reference"]
     logger: DataLogger = modules["logger"]
     odrive_iface: ODriveInterface = modules["odrive"]
+    odrive_read_fast = bool(modules.get("odrive_read_fast", True))
     dt: float = modules["dt"]
     command_type = str(modules.get("command_type", "position")).lower()
     motor_control_mode = str(modules.get("motor_control_mode", "torque")).lower()
@@ -719,6 +722,24 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     measured_tau_lock = threading.Lock()
     stop_measured_torque = threading.Event()
     torque_poll_thread: Optional[threading.Thread] = None
+    vel_cmd_m2_filtered = 0.0
+    motor2_vel_cfg = conventional_cfg.get("motor2_velocity", {}) or {}
+    motor2_mode = motor2_vel_cfg.get("mode", "constant")
+    rate_limit = float(motor2_vel_cfg.get("rate_limit", 0.0))
+    filter_alpha = motor2_vel_cfg.get("filter_alpha")
+    filter_tau = motor2_vel_cfg.get("filter_tau")
+    if filter_alpha is not None:
+        filter_alpha = float(filter_alpha)
+        if filter_alpha <= 0.0:
+            filter_alpha = None
+        else:
+            filter_alpha = max(0.0, min(1.0, filter_alpha))
+    elif filter_tau is not None:
+        filter_tau = float(filter_tau)
+        if filter_tau > 0.0:
+            filter_alpha = dt / (filter_tau + dt)
+        else:
+            filter_alpha = None
 
     def friction_feedforward(velocity: float, reference_velocity: float, error_hint: float) -> float:
         """Return output-axis friction feedforward torque."""
@@ -774,7 +795,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
         poll_interval = max(0.0005, dt)  # do not spin too fast
         while not stop_measured_torque.is_set():
             try:
-                poll_states = odrive_iface.read_states(fast=True)
+                poll_states = odrive_iface.read_states(fast=odrive_read_fast)
                 with measured_tau_lock:
                     measured_tau[0] = poll_states["motor1"].torque_measured
                     measured_tau[1] = poll_states["motor2"].torque_measured
@@ -807,7 +828,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             command = reference.sample(elapsed)
 
             t_read_start = time.perf_counter()
-            states = odrive_iface.read_states(fast=True)
+            states = odrive_iface.read_states(fast=odrive_read_fast)
             t_read_end = time.perf_counter()
             output_state = states.get("output", states["motor1"])
             motor1_state = states["motor1"]
@@ -877,9 +898,6 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
 
             # Conventional Control Logic
             # 1. Determine Motor 2 Velocity Command (Schedule / Adaptive)
-            motor2_vel_cfg = conventional_cfg.get("motor2_velocity", {})
-            motor2_mode = motor2_vel_cfg.get("mode", "constant")
-            
             if motor2_mode == "constant":
                 vel_cmd_m2 = float(motor2_vel_cfg.get("value", 0.0))
             elif motor2_mode == "adaptive":
@@ -929,6 +947,19 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                     vel_cmd_m2 = 0.0
             else:
                 vel_cmd_m2 = 0.0
+
+            if rate_limit > 0.0:
+                max_delta = rate_limit * dt
+                delta = vel_cmd_m2 - vel_cmd_m2_filtered
+                delta = max(-max_delta, min(max_delta, delta))
+                vel_cmd_m2_limited = vel_cmd_m2_filtered + delta
+            else:
+                vel_cmd_m2_limited = vel_cmd_m2
+
+            if filter_alpha is not None:
+                vel_cmd_m2_filtered += filter_alpha * (vel_cmd_m2_limited - vel_cmd_m2_filtered)
+            else:
+                vel_cmd_m2_filtered = vel_cmd_m2_limited
             
             # 2. Calculate Motor 2 Torque Command (Velocity Control Loop)
             # We use the custom VelocityController instance
@@ -938,7 +969,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             )
             m2_command = PositionCommand(
                 position=0.0, # Not used for velocity control
-                velocity=vel_cmd_m2,
+                velocity=vel_cmd_m2_filtered,
                 acceleration=0.0
             )
             tau2_cmd, _ = motor2_controller.update(m2_command, m2_feedback)

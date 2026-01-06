@@ -144,6 +144,9 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
     ).lower()
     if command_type not in {"position", "velocity"}:
         raise ValueError("command_type must be 'position' or 'velocity'")
+    sim_mode = str(controller_cfg.get("simulation_mode", "proposed")).lower()
+    if sim_mode not in {"proposed", "conventional"}:
+        raise ValueError("simulation_mode must be 'proposed' or 'conventional'")
     reference_cfg = dict(reference_cfg)
     reference_cfg["command_type"] = command_type
     reference = ReferenceGenerator(reference_cfg)
@@ -157,11 +160,30 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
     inertia = float(plant_cfg.get("inertia", 0.015))
     damping = float(plant_cfg.get("damping", 0.002))
     mechanism_matrix = np.asarray(plant_cfg.get("mechanism_matrix", [1.0, 1.0]), dtype=float)
+    mechanism_vec = np.asarray(mechanism_matrix, dtype=float).reshape(2)
     motor_output_gains = np.asarray(
         plant_cfg.get("motor_output_gains", mechanism_matrix), dtype=float
     )
 
-    controller = _build_controller(controller_cfg, command_type, dt, inertia, damping)
+    per_motor_cfg = controller_cfg.get("per_motor_pid", {})
+    derivative_mode = per_motor_cfg.get("derivative_mode", "error")
+    derivative_alpha = float(per_motor_cfg.get("derivative_filter_alpha", 1.0))
+    conventional_cfg = controller_cfg.get("conventional", {})
+    if not isinstance(conventional_cfg, dict):
+        conventional_cfg = {}
+    if sim_mode == "conventional" and command_type == "position":
+        motor1_pid = conventional_cfg.get("motor1_pid", controller_cfg.get("outer_pid", {}))
+        controller = PositionController(
+            gains=motor1_pid,
+            plant_inertia=inertia,
+            plant_damping=damping,
+            dt=dt,
+            derivative_mode=derivative_mode,
+            derivative_filter_alpha=derivative_alpha,
+            use_feedforward=bool(motor1_pid.get("use_feedforward", True)),
+        )
+    else:
+        controller = _build_controller(controller_cfg, command_type, dt, inertia, damping)
 
     torque_limits = controller_cfg.get("torque_limits", {})
     rate_limits = controller_cfg.get("torque_rate_limits", {})
@@ -200,6 +222,8 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
             )
 
     dob_cfg = controller_cfg.get("dob", {})
+    if sim_mode == "conventional":
+        dob_cfg = conventional_cfg.get("dob", dob_cfg) if isinstance(conventional_cfg, dict) else dob_cfg
     dob_enabled = bool(dob_cfg.get("enabled", True))
     dob_input_mode = str(dob_cfg.get("torque_input_mode", "command")).lower()
     dob_applied_sign = float(
@@ -235,6 +259,36 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
     output_pos = 0.0
     output_vel = 0.0
     prev_tau_alloc = np.zeros(2, dtype=float)
+    motor2_pos = 0.0
+    motor2_vel = 0.0
+    motor2_active = False
+    motor2_controller = None
+    motor2_plant_cfg = conventional_cfg.get("motor2_plant", {}) if sim_mode == "conventional" else {}
+    motor2_inertia = float(motor2_plant_cfg.get("inertia", inertia))
+    motor2_damping = float(motor2_plant_cfg.get("damping", damping))
+    if sim_mode == "conventional":
+        motor2_pid_cfg = conventional_cfg.get("motor2_pid", {})
+        m2_ctrl_gains = {
+            "kp": float(motor2_pid_cfg.get("kp", 0.1)),
+            "ki": float(motor2_pid_cfg.get("ki", 0.0)),
+            "kd": float(motor2_pid_cfg.get("kd", 0.0)),
+            "max_output": float(motor2_pid_cfg.get("max_output", torque_limits.get("motor2", 1.0))),
+        }
+        motor2_controller = VelocityController(
+            gains=m2_ctrl_gains,
+            plant_inertia=0.0,
+            plant_damping=0.0,
+            dt=dt,
+            derivative_mode=derivative_mode,
+            derivative_filter_alpha=derivative_alpha,
+            use_feedforward=False,
+        )
+    position_guard_cfg = controller_cfg.get("position_guard", {}) or {}
+    position_guard_enabled = bool(position_guard_cfg.get("enabled", False))
+    position_guard_limit = abs(float(position_guard_cfg.get("limit_turns", 0.0)))
+    position_guard_soft = abs(float(position_guard_cfg.get("soft_zone", 0.0)))
+    position_guard_min_scale = float(position_guard_cfg.get("min_scale", 0.0))
+    position_guard_min_scale = max(0.0, min(1.0, position_guard_min_scale))
 
     for step in range(steps + 1):
         t = step * dt
@@ -276,26 +330,114 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
             tau_aug = tau_cmd
             dob_diag = {"filtered_disturbance": 0.0}
 
-        if dist_mode == "dynamic" and assist_manager is not None:
-            assist_status = assist_manager.update(tau_aug)
-            weights = assist_status.weights
-            secondary_gain = assist_status.secondary_gain
+        if position_guard_enabled and position_guard_limit > 0.0:
+            pos_abs = abs(float(output_pos))
+            pos_sign = 1.0 if output_pos >= 0.0 else -1.0
+            if position_guard_soft > 0.0:
+                start = max(0.0, position_guard_limit - position_guard_soft)
+                if pos_abs >= position_guard_limit:
+                    if tau_aug * pos_sign > 0.0:
+                        tau_aug *= position_guard_min_scale
+                elif pos_abs > start:
+                    ratio = (position_guard_limit - pos_abs) / position_guard_soft
+                    scale = position_guard_min_scale + (1.0 - position_guard_min_scale) * max(
+                        0.0, min(1.0, ratio)
+                    )
+                    if tau_aug * pos_sign > 0.0:
+                        tau_aug *= scale
+            else:
+                if pos_abs >= position_guard_limit and tau_aug * pos_sign > 0.0:
+                    tau_aug *= position_guard_min_scale
+
+        if sim_mode == "conventional":
+            motor2_vel_cfg = conventional_cfg.get("motor2_velocity", {})
+            motor2_mode = motor2_vel_cfg.get("mode", "constant")
+            if motor2_mode == "constant":
+                vel_cmd_m2 = float(motor2_vel_cfg.get("value", 0.0))
+            elif motor2_mode == "adaptive":
+                A1 = float(mechanism_vec[0])
+                limit1 = float(torque_limits.get("motor1", 1.0))
+                if abs(A1) > 1e-6:
+                    tau1_req = tau_aug / A1
+                    util1 = abs(tau1_req) / (limit1 + 1e-9)
+                else:
+                    util1 = 0.0
+                threshold = float(motor2_vel_cfg.get("utilization_threshold", 0.6))
+                target_vel = float(motor2_vel_cfg.get("target_velocity", 5.0))
+                hysteresis = float(motor2_vel_cfg.get("hysteresis", 0.1))
+                if motor2_active:
+                    if util1 < (threshold - hysteresis):
+                        motor2_active = False
+                else:
+                    if util1 > threshold:
+                        motor2_active = True
+                sign_direction = math.copysign(1.0, tau_aug) if abs(tau_aug) > 1e-9 else 0.0
+                vel_cmd_m2 = target_vel * sign_direction if motor2_active else 0.0
+            else:
+                vel_cmd_m2 = 0.0
+
+            if motor2_controller is None:
+                tau2_cmd = 0.0
+            else:
+                m2_feedback = PositionFeedback(position=motor2_pos, velocity=motor2_vel)
+                m2_command = PositionCommand(position=0.0, velocity=vel_cmd_m2, acceleration=0.0)
+                tau2_cmd, _ = motor2_controller.update(m2_command, m2_feedback)
+
+            A1 = float(mechanism_vec[0])
+            A2 = float(mechanism_vec[1])
+            tau2_measured = tau2_cmd
+            if abs(A1) < 1e-6:
+                tau1_cmd = 0.0
+            else:
+                tau1_cmd = (tau_aug - A2 * tau2_measured) / A1
+            tau_cmds = np.array([tau1_cmd, tau2_cmd], dtype=float)
+            limits_vec = np.array(
+                [
+                    abs(float(torque_limits.get("motor1", 1.0))),
+                    abs(float(torque_limits.get("motor2", 1.0))),
+                ],
+                dtype=float,
+            )
+            tau_alloc = np.clip(tau_cmds, -limits_vec, limits_vec)
+            prev_tau_alloc = tau_alloc.copy()
+            tau_out = float(np.dot(mechanism_matrix, tau_alloc))
+            output_pos, output_vel = _update_output_state(
+                output_pos,
+                output_vel,
+                tau_out,
+                inertia,
+                damping,
+                dt,
+            )
+            motor2_pos, motor2_vel = _update_output_state(
+                motor2_pos,
+                motor2_vel,
+                tau_alloc[1],
+                motor2_inertia,
+                motor2_damping,
+                dt,
+            )
         else:
-            weights = fixed_weights
-            secondary_gain = fixed_secondary_gain
+            if dist_mode == "dynamic" and assist_manager is not None:
+                assist_status = assist_manager.update(tau_aug)
+                weights = assist_status.weights
+                secondary_gain = assist_status.secondary_gain
+            else:
+                weights = fixed_weights
+                secondary_gain = fixed_secondary_gain
 
-        tau_alloc, _ = allocator.allocate(tau_aug, weights, secondary_gain)
-        prev_tau_alloc = tau_alloc.copy()
+            tau_alloc, _ = allocator.allocate(tau_aug, weights, secondary_gain)
+            prev_tau_alloc = tau_alloc.copy()
 
-        tau_out = float(np.dot(mechanism_matrix, tau_alloc))
-        output_pos, output_vel = _update_output_state(
-            output_pos,
-            output_vel,
-            tau_out,
-            inertia,
-            damping,
-            dt,
-        )
+            tau_out = float(np.dot(mechanism_matrix, tau_alloc))
+            output_pos, output_vel = _update_output_state(
+                output_pos,
+                output_vel,
+                tau_out,
+                inertia,
+                damping,
+                dt,
+            )
 
         logger.log(
             t,
@@ -304,8 +446,8 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
             tau_1=tau_alloc[0],
             iq_1=tau_alloc[0],
             tau_meas_1=tau_alloc[0],
-            pos_2=0.0,
-            vel_2=0.0,
+            pos_2=motor2_pos,
+            vel_2=motor2_vel,
             tau_2=tau_alloc[1],
             iq_2=tau_alloc[1],
             tau_meas_2=tau_alloc[1],

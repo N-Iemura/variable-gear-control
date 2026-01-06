@@ -5,6 +5,12 @@ control_frequency_hz: 200  # 制御ループ周波数 [Hz]
 sample_time_s: 0.005       # サンプリング時間 [s] (1/frequency)
 command_type: position     # 上位からの指令タイプ: position | velocity
 motor_control_mode: torque # モータへの指令モード: torque | velocity
+simulation_mode: conventional # proposed | conventional
+position_guard:
+  enabled: false          # trueで出力位置が閾値を超えたときトルクを抑制
+  limit_turns: 0.1       # [turn] 出力位置の上限
+  soft_zone: 0.02        # [turn] 上限手前で段階的にトルクを落とす幅
+  min_scale: 0.0         # [0-1] 上限超過時のトルク倍率
 
 # ==========================================
 # トルク配分設定 (Torque Allocation)
@@ -34,7 +40,7 @@ torque_distribution:
 # プラントモデル (Plant Model)
 # ==========================================
 plant:
-  inertia: 3.009967215896643318  # システム全体の慣性モーメント [kg m^2]
+  inertia: 1.509967215896643318  # システム全体の慣性モーメント [kg m^2]
   damping: 8.172049793342932     # システム全体の粘性摩擦係数 [Nm s/rad]
   # 機構行列: モータトルク [tau1, tau2] から出力トルク tau_out への変換行列
   # tau_out = A @ [tau1, tau2]^T
@@ -45,8 +51,8 @@ plant:
 # PID制御ゲイン
 # ==========================================
 outer_pid:  # 位置制御ループ (Position -> Velocity)
-  kp: 200.00
-  ki: 100.0
+  kp: 220.00
+  ki: 180.0
   kd: 20.0
   use_feedforward: true
   max_output: 200.0
@@ -180,11 +186,16 @@ conventional:
   # dob: ...
   # torque_limits: ...
   dob:
-  enabled: true
-  torque_input_mode: command  # command | applied
-  applied_sign: -1.0           # appliedが不安定なら -1.0 で符号補正
-  cutoff_hz: 20.0
-  use_damping: true
+    enabled: true
+    torque_input_mode: command  # command | applied
+    applied_sign: -1.0           # appliedが不安定なら -1.0 で符号補正
+    cutoff_hz: 20.0
+    use_damping: true
+
+  # Motor 2 の簡易プラントモデル (シミュ用)
+  motor2_plant:
+    inertia: 0.01
+    damping: 0.05
 
   # Motor 2 (副モータ) の速度制御設定
   motor2_velocity:
@@ -192,6 +203,9 @@ conventional:
     # adaptive: Motor1の利用率に応じて速度を変更 (threshold, velocity_ratioを使用)
     mode: adaptive  # constant | adaptive
     value: 0.0      # [turn/s] constant mode value
+    rate_limit: 20.0 # [turn/s^2] 速度指令の変化率制限 (0で無効)
+    filter_tau: 0.5   # [s] 一次遅れフィルタ (0で無効)
+    filter_alpha: 0.5 # [0-1] tauより優先、0で無効
     
     # Adaptive Mode Settings
     utilization_threshold: 0.2  # Motor1の利用率がこれを超えたらMotor2を動かす

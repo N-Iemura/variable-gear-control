@@ -129,9 +129,6 @@ class ODriveAxisHandle:
         torque_cmd = 0.0
         iq_measured = 0.0
         if self.is_motor and not fast:
-            controller = getattr(self.axis, "controller", None)
-            if controller is not None and hasattr(controller, "input_torque"):
-                torque_cmd = float(controller.input_torque)
             motor = getattr(self.axis, "motor", None)
             if motor is not None:
                 # ODrive exposes Iq in different places/casings across firmware revisions.

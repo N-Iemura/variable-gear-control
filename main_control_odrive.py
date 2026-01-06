@@ -644,6 +644,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     odrive_iface = ODriveInterface(hardware)
     motor_control_mode = str(controller_cfg.get("motor_control_mode", "torque")).lower()
     odrive_velocity_gains = controller_cfg.get("odrive_velocity_gains", {})
+    odrive_read_fast = bool(controller_cfg.get("odrive_read_fast", True))
     tau_to_velocity = TorqueToVelocityConverter(
         inertia=inertia,
         damping=damping,
@@ -678,6 +679,7 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
         "torque_distribution": torque_dist_cfg,
         "motor_control_mode": motor_control_mode,
         "odrive_velocity_gains": odrive_velocity_gains,
+        "odrive_read_fast": odrive_read_fast,
         "direct_velocity": direct_velocity,
     }
 
@@ -696,14 +698,25 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     reference: ReferenceGenerator = modules["reference"]
     logger: DataLogger = modules["logger"]
     odrive_iface: ODriveInterface = modules["odrive"]
+    odrive_read_fast = bool(modules.get("odrive_read_fast", True))
     dt: float = modules["dt"]
     command_type = str(modules.get("command_type", "position")).lower()
     motor_control_mode = str(modules.get("motor_control_mode", "torque")).lower()
     if motor_control_mode not in {"torque", "velocity"}:
         raise ValueError("motor_control_mode must be 'torque' or 'velocity'")
     mechanism_matrix = np.asarray(modules.get("mechanism_matrix"), dtype=float)
+    mechanism_vec = mechanism_matrix.flatten()
     motor_output_gains = np.asarray(
         modules.get("motor_output_gains", mechanism_matrix), dtype=float
+    )
+    controller_cfg = modules.get("config", {})
+    torque_limits = controller_cfg.get("torque_limits", {})
+    torque_limits_vec = np.array(
+        [
+            abs(float(torque_limits.get("motor1", 1.0))),
+            abs(float(torque_limits.get("motor2", 1.0))),
+        ],
+        dtype=float,
     )
     torque_dist_cfg = modules.get("torque_distribution", {}) or {}
     dist_mode = str(torque_dist_cfg.get("mode", "dynamic")).lower()
@@ -712,6 +725,21 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     if fixed_weights.shape != (2,) or np.any(fixed_weights <= 0.0):
         raise ValueError("torque_distribution.fixed_weights must be two positive values.")
     friction_cfg = modules.get("friction_ff", {}) or {}
+    freeze_cfg = controller_cfg.get("freeze", {}) or {}
+    hold_motor = str(freeze_cfg.get("motor", "")).lower()
+    hold_kp = float(freeze_cfg.get("kp", 0.0))
+    hold_kd = float(freeze_cfg.get("kd", 0.0))
+    hold_threshold = abs(float(freeze_cfg.get("torque_threshold", 0.0)))
+    hold_max = freeze_cfg.get("max_torque")
+    hold_motor_idx = 0 if hold_motor == "motor1" else 1 if hold_motor == "motor2" else None
+    hold_active = False
+    hold_target = 0.0
+    position_guard_cfg = controller_cfg.get("position_guard", {}) or {}
+    position_guard_enabled = bool(position_guard_cfg.get("enabled", False))
+    position_guard_limit = abs(float(position_guard_cfg.get("limit_turns", 0.0)))
+    position_guard_soft = abs(float(position_guard_cfg.get("soft_zone", 0.0)))
+    position_guard_min_scale = float(position_guard_cfg.get("min_scale", 0.0))
+    position_guard_min_scale = max(0.0, min(1.0, position_guard_min_scale))
     use_measured_torque = dob_enabled and dob_input_mode == "applied"
     measured_tau = np.zeros(2, dtype=float)
     measured_iq = np.zeros(2, dtype=float)
@@ -772,7 +800,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
         poll_interval = max(0.0005, dt)  # do not spin too fast
         while not stop_measured_torque.is_set():
             try:
-                poll_states = odrive_iface.read_states(fast=True)
+                poll_states = odrive_iface.read_states(fast=odrive_read_fast)
                 with measured_tau_lock:
                     measured_tau[0] = poll_states["motor1"].torque_measured
                     measured_tau[1] = poll_states["motor2"].torque_measured
@@ -805,7 +833,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             command = reference.sample(elapsed)
 
             t_read_start = time.perf_counter()
-            states = odrive_iface.read_states(fast=True)
+            states = odrive_iface.read_states(fast=odrive_read_fast)
             t_read_end = time.perf_counter()
             output_state = states.get("output", states["motor1"])
 
@@ -871,6 +899,25 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 tau_aug = tau_cmd
                 dob_diag = {"filtered_disturbance": 0.0}
 
+            if position_guard_enabled and position_guard_limit > 0.0:
+                pos_abs = abs(float(output_state.position))
+                pos_sign = 1.0 if output_state.position >= 0.0 else -1.0
+                if position_guard_soft > 0.0:
+                    start = max(0.0, position_guard_limit - position_guard_soft)
+                    if pos_abs >= position_guard_limit:
+                        if tau_aug * pos_sign > 0.0:
+                            tau_aug *= position_guard_min_scale
+                    elif pos_abs > start:
+                        ratio = (position_guard_limit - pos_abs) / position_guard_soft
+                        scale = position_guard_min_scale + (1.0 - position_guard_min_scale) * max(
+                            0.0, min(1.0, ratio)
+                        )
+                        if tau_aug * pos_sign > 0.0:
+                            tau_aug *= scale
+                else:
+                    if pos_abs >= position_guard_limit and tau_aug * pos_sign > 0.0:
+                        tau_aug *= position_guard_min_scale
+
             if dist_mode == "fixed":
                 weights = fixed_weights
                 secondary_gain = fixed_secondary_gain
@@ -886,6 +933,40 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 raise ValueError("torque_distribution.mode must be 'fixed' or 'dynamic'.")
 
             tau_alloc, alloc_diag = allocator.allocate(tau_aug, weights, secondary_gain)
+            if (
+                motor_control_mode == "torque"
+                and hold_motor_idx is not None
+                and (hold_kp > 0.0 or hold_kd > 0.0)
+            ):
+                hold_enabled = secondary_gain <= 1e-6 or abs(tau_alloc[hold_motor_idx]) <= hold_threshold
+                if hold_enabled:
+                    hold_state = states["motor1"] if hold_motor_idx == 0 else states["motor2"]
+                    if not hold_active:
+                        hold_target = float(hold_state.position)
+                        hold_active = True
+                    hold_error = hold_target - float(hold_state.position)
+                    hold_tau = hold_kp * hold_error - hold_kd * float(hold_state.velocity)
+                    hold_limit = torque_limits_vec[hold_motor_idx]
+                    if hold_max is not None:
+                        hold_limit = min(hold_limit, abs(float(hold_max)))
+                    if hold_limit > 0.0:
+                        hold_tau = max(-hold_limit, min(hold_limit, hold_tau))
+                    if hold_motor_idx == 1:
+                        a1 = float(mechanism_vec[0])
+                        a2 = float(mechanism_vec[1])
+                        if abs(a1) > 1e-9:
+                            tau_alloc = tau_alloc + np.array([-a2 / a1 * hold_tau, hold_tau])
+                    else:
+                        a1 = float(mechanism_vec[0])
+                        a2 = float(mechanism_vec[1])
+                        if abs(a2) > 1e-9:
+                            tau_alloc = tau_alloc + np.array([hold_tau, -a1 / a2 * hold_tau])
+                    tau_alloc = np.clip(tau_alloc, -torque_limits_vec, torque_limits_vec)
+                    tau_alloc = allocator._enforce_rate_limits(tau_alloc)
+                    if allocator.sign_enforcement:
+                        tau_alloc = allocator._enforce_sign(tau_alloc, tau_aug)
+                else:
+                    hold_active = False
             # 次周期のDOB入力用に、今回送ったモータ指令を保存
             prev_tau_alloc = tau_alloc.copy()
             if motor_control_mode == "velocity":
