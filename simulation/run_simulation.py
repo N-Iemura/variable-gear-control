@@ -186,6 +186,12 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
         controller = _build_controller(controller_cfg, command_type, dt, inertia, damping)
 
     torque_limits = controller_cfg.get("torque_limits", {})
+    velocity_cfg = controller_cfg.get("velocity_distribution", {})
+    kinematic_matrix = np.asarray(
+        velocity_cfg.get("kinematic_matrix", plant_cfg.get("kinematic_matrix", mechanism_matrix)),
+        dtype=float,
+    )
+    kinematic_vec = np.asarray(kinematic_matrix, dtype=float).reshape(2)
     rate_limits = controller_cfg.get("torque_rate_limits", {})
     allocation_cfg = controller_cfg.get("torque_allocation", {})
     torque_dist_cfg = controller_cfg.get("torque_distribution", {})
@@ -262,6 +268,41 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
     motor2_pos = 0.0
     motor2_vel = 0.0
     motor2_active = False
+    motor2_vel_cfg = conventional_cfg.get("motor2_velocity", {}) if sim_mode == "conventional" else {}
+    motor2_mode = str(motor2_vel_cfg.get("mode", "constant")).lower()
+    ratio_schedule_cfg = motor2_vel_cfg.get("ratio_schedule", []) or []
+    ratio_schedule: list[dict[str, float]] = []
+    if isinstance(ratio_schedule_cfg, list):
+        for entry in ratio_schedule_cfg:
+            if not isinstance(entry, dict):
+                continue
+            ratio = float(entry.get("ratio", 0.0))
+            util_min = float(entry.get("utilization_min", 0.0))
+            if ratio > 0.0:
+                ratio_schedule.append({"util_min": util_min, "ratio": ratio})
+    ratio_schedule.sort(key=lambda item: item["util_min"])
+    ratio_idx = 0
+    ratio_hysteresis = abs(float(motor2_vel_cfg.get("hysteresis", 0.0)))
+    base_ratio = abs(float(mechanism_vec[0])) if abs(mechanism_vec[0]) > 1e-9 else 1.0
+    a1_sign = math.copysign(1.0, mechanism_vec[0]) if abs(mechanism_vec[0]) > 1e-9 else 1.0
+    k1 = float(kinematic_vec[0])
+    k2 = float(kinematic_vec[1])
+    vel_cmd_m2_filtered = 0.0
+    rate_limit = float(motor2_vel_cfg.get("rate_limit", 0.0))
+    filter_alpha = motor2_vel_cfg.get("filter_alpha")
+    filter_tau = motor2_vel_cfg.get("filter_tau")
+    if filter_alpha is not None:
+        filter_alpha = float(filter_alpha)
+        if filter_alpha <= 0.0:
+            filter_alpha = None
+        else:
+            filter_alpha = max(0.0, min(1.0, filter_alpha))
+    elif filter_tau is not None:
+        filter_tau = float(filter_tau)
+        if filter_tau > 0.0:
+            filter_alpha = dt / (filter_tau + dt)
+        else:
+            filter_alpha = None
     motor2_controller = None
     motor2_plant_cfg = conventional_cfg.get("motor2_plant", {}) if sim_mode == "conventional" else {}
     motor2_inertia = float(motor2_plant_cfg.get("inertia", inertia))
@@ -350,9 +391,43 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
                     tau_aug *= position_guard_min_scale
 
         if sim_mode == "conventional":
-            motor2_vel_cfg = conventional_cfg.get("motor2_velocity", {})
-            motor2_mode = motor2_vel_cfg.get("mode", "constant")
-            if motor2_mode == "constant":
+            selected_ratio = None
+            a1_eff = None
+            if motor2_mode == "schedule":
+                limit1 = float(torque_limits.get("motor1", 1.0))
+                current_ratio = (
+                    ratio_schedule[ratio_idx]["ratio"] if ratio_schedule else base_ratio
+                )
+                a1_eff = a1_sign * current_ratio
+                if abs(a1_eff) > 1e-9:
+                    tau1_req = tau_aug / a1_eff
+                    util1 = abs(tau1_req) / (limit1 + 1e-9)
+                else:
+                    util1 = 0.0
+
+                if ratio_schedule:
+                    while (
+                        ratio_idx + 1 < len(ratio_schedule)
+                        and util1 >= ratio_schedule[ratio_idx + 1]["util_min"] + ratio_hysteresis
+                    ):
+                        ratio_idx += 1
+                    while (
+                        ratio_idx > 0
+                        and util1 < ratio_schedule[ratio_idx]["util_min"] - ratio_hysteresis
+                    ):
+                        ratio_idx -= 1
+                    selected_ratio = ratio_schedule[ratio_idx]["ratio"]
+                else:
+                    selected_ratio = base_ratio
+                a1_eff = a1_sign * selected_ratio
+
+                omega_out_ref = float(output_vel)
+                if abs(k2) > 1e-9:
+                    omega1_ref = selected_ratio * a1_sign * omega_out_ref
+                    vel_cmd_m2 = (omega_out_ref - k1 * omega1_ref) / k2
+                else:
+                    vel_cmd_m2 = 0.0
+            elif motor2_mode == "constant":
                 vel_cmd_m2 = float(motor2_vel_cfg.get("value", 0.0))
             elif motor2_mode == "adaptive":
                 A1 = float(mechanism_vec[0])
@@ -376,20 +451,43 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
             else:
                 vel_cmd_m2 = 0.0
 
+            if rate_limit > 0.0:
+                max_delta = rate_limit * dt
+                delta = vel_cmd_m2 - vel_cmd_m2_filtered
+                delta = max(-max_delta, min(max_delta, delta))
+                vel_cmd_m2_limited = vel_cmd_m2_filtered + delta
+            else:
+                vel_cmd_m2_limited = vel_cmd_m2
+
+            if filter_alpha is not None:
+                vel_cmd_m2_filtered += filter_alpha * (vel_cmd_m2_limited - vel_cmd_m2_filtered)
+            else:
+                vel_cmd_m2_filtered = vel_cmd_m2_limited
+
             if motor2_controller is None:
                 tau2_cmd = 0.0
             else:
                 m2_feedback = PositionFeedback(position=motor2_pos, velocity=motor2_vel)
-                m2_command = PositionCommand(position=0.0, velocity=vel_cmd_m2, acceleration=0.0)
+                m2_command = PositionCommand(
+                    position=0.0,
+                    velocity=vel_cmd_m2_filtered,
+                    acceleration=0.0,
+                )
                 tau2_cmd, _ = motor2_controller.update(m2_command, m2_feedback)
 
             A1 = float(mechanism_vec[0])
             A2 = float(mechanism_vec[1])
             tau2_measured = tau2_cmd
-            if abs(A1) < 1e-6:
-                tau1_cmd = 0.0
+            if motor2_mode == "schedule":
+                if a1_eff is None or abs(a1_eff) < 1e-9:
+                    tau1_cmd = 0.0
+                else:
+                    tau1_cmd = tau_aug / a1_eff
             else:
-                tau1_cmd = (tau_aug - A2 * tau2_measured) / A1
+                if abs(A1) < 1e-6:
+                    tau1_cmd = 0.0
+                else:
+                    tau1_cmd = (tau_aug - A2 * tau2_measured) / A1
             tau_cmds = np.array([tau1_cmd, tau2_cmd], dtype=float)
             limits_vec = np.array(
                 [

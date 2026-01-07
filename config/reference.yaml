@@ -1,25 +1,25 @@
 command_type: position  # position | velocity
-active_profile: step
+active_profile: chirp
 file_label: null
 
 step:
   initial_wait: 1.0
   step_duration: 100.0
-  output_amplitude: 0.1
+  output_amplitude: 0.4
   offset: 0.0
 
 sine:
   initial_wait: 1.0
-  output_amplitude: 0.05
-  frequency_hz: 0.5
+  output_amplitude: 0.1
+  frequency_hz: 2.0
   offset: 0.0
 
 chirp:
   initial_wait: 1.0
   output_amplitude: 0.1      # [turn] 振幅を少し大きく
-  start_frequency_hz: 0.5
-  end_frequency_hz: 5.0      # 高周波まで回す
-  duration: 10.0
+  start_frequency_hz: 0.2
+  end_frequency_hz: 3.0      # 高周波まで回す
+  duration: 15.0
   post_duration: 0.0         # [s] chirp終了後にログを伸ばす時間
   offset: 0.0
   window: smootherstep

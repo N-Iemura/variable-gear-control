@@ -700,6 +700,11 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     if motor_control_mode not in {"torque", "velocity"}:
         raise ValueError("motor_control_mode must be 'torque' or 'velocity'")
     mechanism_matrix = np.asarray(modules.get("mechanism_matrix"), dtype=float)
+    mechanism_vec = np.asarray(mechanism_matrix, dtype=float).reshape(2)
+    kinematic_matrix = np.asarray(
+        modules.get("kinematic_matrix", mechanism_vec), dtype=float
+    )
+    kinematic_vec = np.asarray(kinematic_matrix, dtype=float).reshape(2)
     motor_output_gains = np.asarray(
         modules.get("motor_output_gains", mechanism_matrix), dtype=float
     )
@@ -715,6 +720,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     torque_limits = controller_cfg.get("torque_limits", {})
     
     friction_cfg = modules.get("friction_ff", {}) or {}
+    conventional_cfg = modules.get("conventional_cfg", {}) or {}
     use_measured_torque = dob_enabled and dob_input_mode == "applied"
     measured_tau = np.zeros(2, dtype=float)
     measured_iq = np.zeros(2, dtype=float)
@@ -724,10 +730,30 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     torque_poll_thread: Optional[threading.Thread] = None
     vel_cmd_m2_filtered = 0.0
     motor2_vel_cfg = conventional_cfg.get("motor2_velocity", {}) or {}
-    motor2_mode = motor2_vel_cfg.get("mode", "constant")
+    motor2_mode = str(motor2_vel_cfg.get("mode", "constant")).lower()
+    motor2_control_mode = str(motor2_vel_cfg.get("control_mode", "pc_pid")).lower()
+    if motor2_control_mode not in {"pc_pid", "odrive"}:
+        raise ValueError("motor2_velocity.control_mode must be 'pc_pid' or 'odrive'")
+    ratio_schedule_cfg = motor2_vel_cfg.get("ratio_schedule", []) or []
+    ratio_schedule: list[dict[str, float]] = []
+    if isinstance(ratio_schedule_cfg, list):
+        for entry in ratio_schedule_cfg:
+            if not isinstance(entry, dict):
+                continue
+            ratio = float(entry.get("ratio", 0.0))
+            util_min = float(entry.get("utilization_min", 0.0))
+            if ratio > 0.0:
+                ratio_schedule.append({"util_min": util_min, "ratio": ratio})
+    ratio_schedule.sort(key=lambda item: item["util_min"])
+    ratio_idx = 0
+    ratio_hysteresis = abs(float(motor2_vel_cfg.get("hysteresis", 0.0)))
+    base_ratio = abs(float(mechanism_vec[0])) if abs(mechanism_vec[0]) > 1e-9 else 1.0
     rate_limit = float(motor2_vel_cfg.get("rate_limit", 0.0))
     filter_alpha = motor2_vel_cfg.get("filter_alpha")
     filter_tau = motor2_vel_cfg.get("filter_tau")
+    a1_sign = math.copysign(1.0, mechanism_vec[0]) if abs(mechanism_vec[0]) > 1e-9 else 1.0
+    k1 = float(kinematic_vec[0])
+    k2 = float(kinematic_vec[1])
     if filter_alpha is not None:
         filter_alpha = float(filter_alpha)
         if filter_alpha <= 0.0:
@@ -764,8 +790,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     if "motor1" in odrive_iface.devices:
         odrive_iface.devices["motor1"].prepare_for_torque_control()
         
-    # Set Motor 2 to Torque Control (Custom Velocity Loop)
-    conventional_cfg = modules.get("conventional_cfg", {})
+    # Set Motor 2 to Torque/Velocity Control (Custom/ODrive Velocity Loop)
     motor2_pid_cfg = conventional_cfg.get("motor2_pid", {})
     
     # Map config keys to VelocityController expected keys
@@ -776,16 +801,33 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
         "max_output": float(motor2_pid_cfg.get("max_output", torque_limits.get("motor2", 1.0)))
     }
     
-    motor2_controller = VelocityController(
-        gains=m2_ctrl_gains,
-        plant_inertia=0.0, # Not used if feedforward is false
-        plant_damping=0.0,
-        dt=dt,
-        use_feedforward=False
-    )
+    motor2_controller = None
+    if motor2_control_mode == "pc_pid":
+        motor2_controller = VelocityController(
+            gains=m2_ctrl_gains,
+            plant_inertia=0.0, # Not used if feedforward is false
+            plant_damping=0.0,
+            dt=dt,
+            use_feedforward=False
+        )
 
     if "motor2" in odrive_iface.devices:
-        odrive_iface.devices["motor2"].prepare_for_torque_control()
+        if motor2_control_mode == "odrive":
+            odrive_iface.devices["motor2"].prepare_for_velocity_control()
+            gains_cfg = modules.get("odrive_velocity_gains", {})
+            if isinstance(gains_cfg, dict):
+                gains = gains_cfg.get("motor2")
+                if isinstance(gains, dict):
+                    applied = odrive_iface.set_velocity_gains(
+                        "motor2",
+                        vel_gain=gains.get("vel_gain"),
+                        vel_integrator_gain=gains.get("vel_integrator_gain"),
+                        vel_integrator_limit=gains.get("vel_integrator_limit"),
+                    )
+                    if applied:
+                        _LOGGER.info("ODrive velocity gains applied on motor2: %s", applied)
+        else:
+            odrive_iface.devices["motor2"].prepare_for_torque_control()
         
     odrive_iface.zero_positions()
     _LOGGER.info("Conventional Control Loop Started (dt=%.6f s)", dt)
@@ -897,50 +939,87 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 dob_diag = {"filtered_disturbance": 0.0}
 
             # Conventional Control Logic
-            # 1. Determine Motor 2 Velocity Command (Schedule / Adaptive)
-            if motor2_mode == "constant":
+            # 1. Determine Motor 2 Velocity Command (Constant / Adaptive / Ratio Schedule)
+            selected_ratio = None
+            a1_eff = None
+            if motor2_mode == "schedule":
+                limit1 = float(torque_limits.get("motor1", 1.0))
+                current_ratio = (
+                    ratio_schedule[ratio_idx]["ratio"] if ratio_schedule else base_ratio
+                )
+                a1_eff = a1_sign * current_ratio
+                if abs(a1_eff) > 1e-9:
+                    tau1_req = tau_aug / a1_eff
+                    util1 = abs(tau1_req) / (limit1 + 1e-9)
+                else:
+                    util1 = 0.0
+
+                if ratio_schedule:
+                    while (
+                        ratio_idx + 1 < len(ratio_schedule)
+                        and util1 >= ratio_schedule[ratio_idx + 1]["util_min"] + ratio_hysteresis
+                    ):
+                        ratio_idx += 1
+                    while (
+                        ratio_idx > 0
+                        and util1 < ratio_schedule[ratio_idx]["util_min"] - ratio_hysteresis
+                    ):
+                        ratio_idx -= 1
+                    selected_ratio = ratio_schedule[ratio_idx]["ratio"]
+                else:
+                    selected_ratio = base_ratio
+                a1_eff = a1_sign * selected_ratio
+
+                if motor2_control_mode == "odrive":
+                    if direct_velocity and command_type == "velocity":
+                        omega_out_ref = float(reference_velocity)
+                    else:
+                        omega_out_ref = tau_to_velocity.update(
+                            tau_aug, output_state.velocity, friction_torque=friction_tau
+                        )
+                else:
+                    omega_out_ref = float(output_state.velocity)
+                if abs(k2) > 1e-9:
+                    omega1_ref = selected_ratio * a1_sign * omega_out_ref
+                    vel_cmd_m2 = (omega_out_ref - k1 * omega1_ref) / k2
+                else:
+                    vel_cmd_m2 = 0.0
+            elif motor2_mode == "constant":
                 vel_cmd_m2 = float(motor2_vel_cfg.get("value", 0.0))
             elif motor2_mode == "adaptive":
                 # Calculate Motor 1 Utilization based on previous command or current estimate
                 # Utilization = |tau1| / limit1
                 # We use the command from the previous step or current required torque estimate
-                
+
                 # Estimate required torque for Motor 1 if it were to take the full load
                 # tau1_req = tau_aug / A1
-                A1 = mechanism_matrix[0]
+                A1 = mechanism_vec[0]
                 limit1 = torque_limits.get("motor1", 1.0)
-                
+
                 if abs(A1) > 1e-6:
                     tau1_req = tau_aug / A1
                     util1 = abs(tau1_req) / (limit1 + 1e-9)
                 else:
                     util1 = 0.0
-                
+
                 threshold = float(motor2_vel_cfg.get("utilization_threshold", 0.6))
                 target_vel = float(motor2_vel_cfg.get("target_velocity", 5.0))
                 hysteresis = float(motor2_vel_cfg.get("hysteresis", 0.1))
-                
+
                 # Simple hysteresis logic for velocity activation
                 # We need state to maintain hysteresis, using a static variable attached to the function or module level
                 if not hasattr(run_control_loop, "motor2_active"):
                     run_control_loop.motor2_active = False
-                
+
                 if run_control_loop.motor2_active:
                     if util1 < (threshold - hysteresis):
                         run_control_loop.motor2_active = False
                 else:
                     if util1 > threshold:
                         run_control_loop.motor2_active = True
-                
-                # Direction should assist the load? 
-                # If tau_aug is positive, we want positive output torque.
-                # If we rotate Motor 2, it changes the effective gear ratio.
-                # For now, just apply target velocity with sign matching the torque direction to "assist" or "shift gear"
-                # Or simply fixed velocity as requested? "減速比がどれくらいになるかも設定できるように" -> target_velocity implies magnitude.
-                # Let's assume we want to increase speed (assist) in the direction of motion/torque.
-                
+
                 sign_direction = math.copysign(1.0, tau_aug) if abs(tau_aug) > 1e-9 else 0.0
-                
+
                 if run_control_loop.motor2_active:
                     vel_cmd_m2 = target_vel * sign_direction
                 else:
@@ -962,40 +1041,50 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 vel_cmd_m2_filtered = vel_cmd_m2_limited
             
             # 2. Calculate Motor 2 Torque Command (Velocity Control Loop)
-            # We use the custom VelocityController instance
-            m2_feedback = PositionFeedback(
-                position=motor2_state.position,
-                velocity=motor2_state.velocity
-            )
-            m2_command = PositionCommand(
-                position=0.0, # Not used for velocity control
-                velocity=vel_cmd_m2_filtered,
-                acceleration=0.0
-            )
-            tau2_cmd, _ = motor2_controller.update(m2_command, m2_feedback)
+            tau2_cmd = 0.0
+            if motor2_control_mode == "pc_pid" and motor2_controller is not None:
+                m2_feedback = PositionFeedback(
+                    position=motor2_state.position,
+                    velocity=motor2_state.velocity,
+                )
+                m2_command = PositionCommand(
+                    position=0.0,  # Not used for velocity control
+                    velocity=vel_cmd_m2_filtered,
+                    acceleration=0.0,
+                )
+                tau2_cmd, _ = motor2_controller.update(m2_command, m2_feedback)
+            elif motor2_control_mode == "odrive":
+                tau2_cmd = float(tau_measured_snapshot[1]) if has_measured_tau else 0.0
 
             # 3. Calculate Motor 1 Torque Command
-            # tau_out = A1 * tau1 + A2 * tau2
-            # tau1 = (tau_out - A2 * tau2) / A1
-            # We use measured torque for tau2 compensation if available, otherwise assume 0 or model?
-            # Using measured torque is best for disturbance rejection.
-            
             tau2_measured = tau_measured_snapshot[1]
-            A2 = mechanism_matrix[1]
-            
-            # Avoid division by zero if A1 is 0 (should not happen in this setup)
-            if abs(A1) < 1e-6:
-                tau1_cmd = 0.0
+            A1 = mechanism_vec[0]
+            A2 = mechanism_vec[1]
+            if motor2_mode == "schedule":
+                if a1_eff is None or abs(a1_eff) < 1e-9:
+                    tau1_cmd = 0.0
+                else:
+                    tau1_cmd = tau_aug / a1_eff
             else:
-                # DOB is already applied to tau_aug (tau_cmd + disturbance_comp)
-                # So Motor 1 just needs to produce the remaining torque
-                tau1_cmd = (tau_aug - A2 * tau2_measured) / A1
+                # tau_out = A1 * tau1 + A2 * tau2
+                # tau1 = (tau_out - A2 * tau2) / A1
+                # We use measured torque for tau2 compensation if available, otherwise assume 0 or model?
+                # Using measured torque is best for disturbance rejection.
+                if abs(A1) < 1e-6:
+                    tau1_cmd = 0.0
+                else:
+                    # DOB is already applied to tau_aug (tau_cmd + disturbance_comp)
+                    # So Motor 1 just needs to produce the remaining torque
+                    tau1_cmd = (tau_aug - A2 * tau2_measured) / A1
                 
             # 4. Send Commands
             if "motor1" in odrive_iface.devices:
                 odrive_iface.devices["motor1"].command_torque(tau1_cmd)
             if "motor2" in odrive_iface.devices:
-                odrive_iface.devices["motor2"].command_torque(tau2_cmd)
+                if motor2_control_mode == "odrive":
+                    odrive_iface.devices["motor2"].command_velocity(vel_cmd_m2_filtered)
+                else:
+                    odrive_iface.devices["motor2"].command_torque(tau2_cmd)
             
             # Update prev_tau_alloc for DOB (using command for M1, measured for M2 as proxy?)
             # Actually DOB expects the torque we *applied* to the system.
@@ -1004,8 +1093,8 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             prev_tau_alloc = np.array([tau1_cmd, tau2_measured])
             
             # Define tau_alloc for logging compatibility
-            # We log the command sent to Motor 1, and for Motor 2 we log the torque command from the velocity loop.
-            tau_alloc = np.array([tau1_cmd, tau2_cmd])
+            # We log the command sent to Motor 1, and for Motor 2 we log the measured torque.
+            tau_alloc = np.array([tau1_cmd, tau2_measured])
 
             t_ctrl_end = time.perf_counter()
 
