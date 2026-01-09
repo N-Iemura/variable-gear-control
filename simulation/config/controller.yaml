@@ -5,7 +5,7 @@ control_frequency_hz: 200  # 制御ループ周波数 [Hz]
 sample_time_s: 0.005       # サンプリング時間 [s] (1/frequency)
 command_type: position     # 上位からの指令タイプ: position | velocity
 motor_control_mode: torque # モータへの指令モード: torque | velocity
-simulation_mode: proposed # proposed | conventional
+simulation_mode: conventional # proposed | conventional
 position_guard:
   enabled: false          # trueで出力位置が閾値を超えたときトルクを抑制
   limit_turns: 0.1       # [turn] 出力位置の上限
@@ -51,9 +51,9 @@ plant:
 # PID制御ゲイン
 # ==========================================
 outer_pid:  # 位置制御ループ (Position -> Velocity)
-  kp: 220.00
-  ki: 180.0
-  kd: 20.0
+  kp: 80.00
+  ki: 0.0
+  kd: 8.0
   use_feedforward: true
   max_output: 200.0
 
@@ -206,34 +206,34 @@ conventional:
     control_mode: odrive  # odrive | pc_pid
     value: 0.0      # [turn/s] constant mode value
     rate_limit: 20.0 # [turn/s^2] 速度指令の変化率制限 (0で無効)
-    filter_tau: 0.5   # [s] 一次遅れフィルタ (0で無効)
-    filter_alpha: 0.5 # [0-1] tauより優先、0で無効
+    filter_tau: 0.0   # [s] 一次遅れフィルタ (0で無効)
+    filter_alpha: 0.0 # [0-1] tauより優先、0で無効
 
     # Ratio Schedule Settings (omega1 / omega_out)
     ratio_schedule:
       - utilization_min: 0.0
         ratio: 20.0
+      - utilization_min: 0.6
+        ratio: 15.0
       - utilization_min: 0.8
         ratio: 10.0
-      - utilization_min: 0.9
-        ratio: 8.0
     
     # Adaptive Mode Settings
     utilization_threshold: 0.2  # Motor1の利用率がこれを超えたらMotor2を動かす
     target_velocity: 5.0        # [turn/s] Motor2の目標速度 (減速比変更量に相当)
-    hysteresis: 0.1             # 閾値のヒステリシス幅
+    hysteresis: 0.0            # 閾値のヒステリシス幅
 
   # Motor 2 の速度制御PIDゲイン (Velocity -> Torque)
   motor2_pid:
-    kp: 1.0
-    ki: 0.3
-    kd: 0.1
-    max_output: 0.4  # Motor2のトルク制限に合わせる
+    kp: 0.7
+    ki: 0.0
+    kd: 0.0
+    max_output: 0.5  # Motor2のトルク制限に合わせる
 
   # Motor 1 (主モータ) の位置制御PIDゲイン (従来手法用)
   motor1_pid:
-    kp: 10.0
-    ki: 5.0
-    kd: 1.0
+    kp: 80.0
+    ki: 0.0
+    kd: 8.0
     use_feedforward: true
     max_output: 100.0

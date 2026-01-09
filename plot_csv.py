@@ -77,18 +77,18 @@ def plot_csv(csv_path: Path, save_path: Path | None = None, show: bool = False) 
         axes[0].plot(time, omega_ref * 360.0, "--", label=r"$\omega_{\mathrm{ref}}$ [deg/s]")
         axes[0].plot(time, output_vel * 360.0, "-", label=r"$\omega_{\mathrm{out}}$ [deg/s]")
         axes[0].set_ylabel(r"$\omega$ [deg/s]")
-        axes[0].legend(loc="upper right")
+        axes[0].legend(loc="lower right", frameon=True, edgecolor="black")
 
         axes[1].plot(time, output_pos * 360.0, "-", label=r"$\theta_{\mathrm{out}}$ [deg]")
         axes[1].set_ylabel(r"$\theta$ [deg]")
-        axes[1].legend(loc="upper right")
+        axes[1].legend(loc="upper right", frameon=True, edgecolor="black")
     else:
         if theta_ref is None:
             _, theta_ref = _resolve_series(series, ("theta_ref",))
         axes[0].plot(time, theta_ref * 360.0, "--", label=r"$\theta_{\mathrm{ref}}$ [deg]")
         axes[0].plot(time, output_pos * 360.0, "-", label=r"$\theta_{\mathrm{out}}$ [deg]")
         axes[0].set_ylabel(r"$\theta$ [deg]")
-        axes[0].legend(loc="upper right")
+        axes[0].legend(loc="lower right", frameon=True, edgecolor="black")
 
         axes[1].plot(
             time,
@@ -98,13 +98,13 @@ def plot_csv(csv_path: Path, save_path: Path | None = None, show: bool = False) 
             label=r"$\omega_{\mathrm{out}}$ [deg/s]",
         )
         axes[1].set_ylabel(r"$\omega$ [deg/s]")
-        axes[1].legend(loc="upper right")
+        axes[1].legend(loc="upper right", frameon=True, edgecolor="black")
 
     axes[2].plot(time, tau_1, "-", color="tab:blue", label=r"$\tau_1$")
     axes[2].plot(time, tau_2, "-", color="tab:red", label=r"$\tau_2$")
     axes[2].set_ylabel(r"$\tau$ [Nm]")
     axes[2].set_xlabel("Time [s]")
-    axes[2].legend(loc="upper right")
+    axes[2].legend(loc="upper right", frameon=True, edgecolor="black")
 
     for ax in axes:
         ax.grid(False)

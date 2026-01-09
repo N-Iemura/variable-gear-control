@@ -53,7 +53,11 @@ def _default_duration(reference_cfg: Dict[str, object]) -> float:
             cfg.get("start_hold_duration", 0.0)
         ) + 1.0
     if profile == "step":
-        return wait + float(cfg.get("step_duration", 2.0)) * 2.0 + 1.0
+        repeat = bool(cfg.get("repeat", True))
+        duration = float(cfg.get("step_duration", 2.0))
+        if repeat:
+            return wait + duration * 2.0 + 1.0
+        return wait + duration + 1.0
     if profile == "sine":
         freq = max(float(cfg.get("frequency_hz", 0.2)), 1e-3)
         return wait + max(10.0 / freq, 5.0)

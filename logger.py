@@ -19,6 +19,9 @@ try:
             "mathtext.rm": "Times New Roman",
             "mathtext.it": "Times New Roman:italic",
             "mathtext.bf": "Times New Roman:bold",
+            "legend.frameon": True,
+            "legend.framealpha": 1.0,
+            "legend.edgecolor": "black",
         }
     )
 except ImportError:  # pragma: no cover - optional dependency
@@ -343,6 +346,7 @@ class DataLogger:
         control_mode = f"per_motor_pid(outer={'on' if outer_loop_enabled else 'off'})"
         derivative_mode = per_motor_cfg.get("derivative_mode", "error")
         derivative_alpha = per_motor_cfg.get("derivative_filter_alpha", 1.0)
+        sim_mode = str(self.controller_config.get("simulation_mode", "-"))
 
         lines.extend(
             [
@@ -352,6 +356,7 @@ class DataLogger:
                 ("CommandValues", command_values_text),
                 ("Settings", profile_settings),
                 ("ControlMode", control_mode),
+                ("SimulationMode", sim_mode),
                 ("OutputPID", fmt_pid(self.controller_config.get("outer_pid", {}))),
                 ("MotorPID_1", fmt_pid(per_motor_cfg.get("motor1", {}))),
                 ("MotorPID_2", fmt_pid(per_motor_cfg.get("motor2", {}))),

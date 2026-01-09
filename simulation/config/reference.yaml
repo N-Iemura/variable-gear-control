@@ -4,21 +4,22 @@ file_label: null
 
 step:
   initial_wait: 1.0
-  step_duration: 10.0
-  output_amplitude: 0.5
+  step_duration: 5.0
+  output_amplitude: 0.8
   offset: 0.0
+  repeat: false
 
 sine:
   initial_wait: 1.0
   output_amplitude: 0.5
-  frequency_hz: 10
+  frequency_hz: 1.5
   offset: 0.0
 
 chirp:
   initial_wait: 1.0
   output_amplitude: 0.2      # [turn] 振幅を少し大きく
-  start_frequency_hz: 0.5
-  end_frequency_hz: 5.0      # 高周波まで回す
+  start_frequency_hz: 0.2
+  end_frequency_hz: 2.5      # 高周波まで回す
   duration: 10.0
   post_duration: 0.0          # [s] chirp終了後にログを伸ばす時間
   offset: 0.0

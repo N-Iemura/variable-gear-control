@@ -296,8 +296,11 @@ class ReferenceGenerator:
         amp = float(cfg.get("output_amplitude", 0.0))
         duration = float(cfg.get("step_duration", 0.0))
         offset = float(cfg.get("offset", 0.0))
+        repeat = bool(cfg.get("repeat", True))
         if t < wait:
             return PositionCommand(offset)
+        if not repeat:
+            return PositionCommand(offset + amp)
         period = duration * 2.0 if duration > 0.0 else math.inf
         if period == math.inf:
             return PositionCommand(offset + amp)
