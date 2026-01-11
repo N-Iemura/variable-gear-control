@@ -283,16 +283,16 @@ class DataLogger:
             axes[0].plot(time_data, omega_ref_deg, "--", label=r"$\omega_{\mathrm{ref}}$")
             axes[0].plot(time_data, omega_out_deg, "-", label=r"$\omega_{\mathrm{out}}$")
             axes[0].set_ylabel(r"$\omega$ [deg/s]")
-            axes[0].legend(loc="upper right")
+            axes[0].legend(loc="lower right")
 
             axes[1].plot(time_data, theta_out_deg, "-", label=r"$\theta_{\mathrm{out}}$")
             axes[1].set_ylabel(r"$\theta$ [deg]")
-            axes[1].legend(loc="upper right")
+            axes[1].legend(loc="center right")
         else:
             axes[0].plot(time_data, theta_ref_deg, "--", label=r"$\theta_{\mathrm{ref}}$")
             axes[0].plot(time_data, theta_out_deg, "-", label=r"$\theta_{\mathrm{out}}$")
             axes[0].set_ylabel(r"$\theta$ [deg]")
-            axes[0].legend(loc="upper right")
+            axes[0].legend(loc="lower right")
 
             axes[1].plot(
                 time_data,
@@ -302,14 +302,17 @@ class DataLogger:
                 label=r"$\omega_{\mathrm{out}}$",
             )
             axes[1].set_ylabel(r"$\omega$ [deg/s]")
-            axes[1].legend(loc="upper right")
+            axes[1].legend(loc="center right")
 
         axes[2].plot(time_data, tau_1, "-", color="tab:blue", label=r"$\tau_1$")
         axes[2].plot(time_data, tau_2, "-", color="tab:red", label=r"$\tau_2$")
         axes[2].set_ylabel(r"$\tau$ [Nm]")
         axes[2].set_xlabel("Time [s]")
-        axes[2].legend(loc="upper right")
+        axes[2].legend(loc="lower right")
 
+        if len(time_data):
+            for ax in axes:
+                ax.set_xlim(time_data[0], time_data[-1])
         for ax in axes:
             ax.grid(False)
             ax.tick_params(axis="both", direction="in", length=6, width=0.8)

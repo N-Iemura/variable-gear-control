@@ -1,0 +1,24 @@
+active: sine
+profiles:
+  sine:
+    type: sine           # step / sine / ramp
+    start_time: 0.5      # [s]
+    repeat: false
+    amplitude: 0.25      # [turn] or [turn/s] or [Nm]
+    offset: 0.0
+    frequency_hz: 0.5
+
+  step:
+    type: step
+    start_time: 1.0
+    start_value: 0.0
+    target: 2.0          # [turn/s]
+
+  ramp:
+    type: ramp
+    start_time: 0.0
+    start_value: 0.0
+    end_value: 0.8       # [Nm]
+    ramp_duration: 2.0
+    hold_duration: 1.0
+    repeat: false

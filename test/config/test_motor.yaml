@@ -1,0 +1,55 @@
+defaults:
+  # 制御モード: position / velocity / torque
+  mode: position
+  # PIDの実行場所: pc / odrive
+  pid_location: pc
+  # 目標値ファイル (YAML). 未指定なら一定値(0)で実行
+  trajectory_file:
+  # trajectory_file 内のプロファイル名
+  trajectory_profile:
+  # 実行時間 [s] (null/未指定で無限ループ)
+  duration: 5.0
+  # 制御周期 [s]
+  dt: 0.01
+  # PC PIDゲイン
+  kp: 0.0
+  ki: 0.0
+  kd: 0.0
+  # PC PIDの出力上限 [Nm]
+  max_output: 10.0
+  # 慣性・粘性 (フィードフォワード用)
+  inertia: 0.0
+  damping: 0.0
+  # 微分項の計算方法とフィルタ
+  derivative_mode: error
+  derivative_filter: 1.0
+  # trueでフィードフォワード無効
+  no_feedforward: false
+  # ODriveの高速読み取り (位置/速度のみ)
+  fast_mode: false
+  # 状態表示の間隔 [s]
+  print_interval: 0.2
+  # 起動時キャリブレーション
+  calibrate: false
+  # CSV/図の保存先とファイル名接頭辞
+  log_dir: test/csv
+  log_prefix: motor_test
+  fig_dir: test/fig
+  fig_prefix: motor_test
+  # 実行後に自動プロット
+  plot: true
+  # プロットウィンドウを表示
+  plot_show: true
+  # ODrive側のゲイン (対応ファームのみ)
+  odrive_pos_gain:
+  odrive_vel_gain:
+  odrive_vel_integrator_gain:
+  odrive_vel_integrator_limit:
+
+motor1:
+  # モータ1の個別設定
+  inertia: 0.00087
+
+motor2:
+  # モータ2の個別設定
+  inertia: 0.00000473
