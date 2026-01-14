@@ -1,5 +1,5 @@
 command_type: position  # position | velocity
-active_profile: chirp
+active_profile: step
 file_label: null
 
 step:
@@ -11,7 +11,7 @@ step:
 sine:
   initial_wait: 1.0
   output_amplitude: 0.1
-  frequency_hz: 2.0
+  frequency_hz: 0.5
   offset: 0.0
 
 chirp:

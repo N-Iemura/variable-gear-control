@@ -5,14 +5,14 @@ control_frequency_hz: 200  # 制御ループ周波数 [Hz]
 sample_time_s: 0.005       # サンプリング時間 [s] (1/frequency)
 command_type: position     # 上位からの指令タイプ: position | velocity
 motor_control_mode: torque # モータへの指令モード: torque | velocity
-odrive_read_fast: false     # ODrive読み取りを軽量化する (true: 位置/速度のみ, false: Iq/トルクも取得)
+odrive_read_fast: true     # ODrive読み取りを軽量化する (true: 位置/速度のみ, false: Iq/トルクも取得)
 
 # ODrive 速度制御ゲイン (motor2_velocity.control_mode: odrive のときに適用)
 odrive_velocity_gains:
   motor2:
-    vel_gain: 0.05
-    vel_integrator_gain: 0.02
-    vel_integrator_limit: 0.2
+    vel_gain: 0.07
+    vel_integrator_gain: 0.33
+    vel_integrator_limit: 0.33
 position_guard:
   enabled: false          # trueで出力位置が閾値を超えたときトルクを抑制
   limit_turns: 0.1       # [turn] 出力位置の上限
@@ -29,7 +29,7 @@ torque_allocation:
 
   # true (on): バリア関数による動的重み (1/(1-u)^2) - 制限に近づくと急激に重くなる
   # false (off): 制限値の逆二乗に基づく固定重み (1/limit^2)
-  dynamic_utilization: true
+  dynamic_utilization: false
 
   # 重みのローパス設定 (実効重みを平滑化)
   # weight_filter_tau: 時定数 [s] (0 or 未設定で無効)
@@ -59,8 +59,8 @@ plant:
 # ==========================================
 outer_pid:  # 位置制御ループ (Position -> Velocity)
   kp: 60.00
-  ki: 30.0
-  kd: 10.0
+  ki: 10.0
+  kd: 5.0
   use_feedforward: true
   max_output: 150.0
 
@@ -132,7 +132,7 @@ torque_preference:
   secondary_gain: 0.0
 
 torque_limits:  # 各モータの最大トルク [Nm]
-  motor1: 3.0
+  motor1: 2.0
   motor2: 0.5
 
 torque_rate_limits:  # トルク変化率制限 [Nm/s]
@@ -207,7 +207,7 @@ conventional:
     # constant: 一定速度 (valueを使用)
     # adaptive: Motor1の利用率に応じて速度を変更 (threshold, velocity_ratioを使用)
     mode: schedule  # schedule | constant | adaptive
-    control_mode: odrive  # odrive | pc_pid
+    control_mode: pc_pid  # odrive | pc_pid
     value: 0.0      # [turn/s] constant mode value
     rate_limit: 20.0 # [turn/s^2] 速度指令の変化率制限 (0で無効)
     filter_tau: 0.0   # [s] 一次遅れフィルタ (0で無効)
@@ -216,11 +216,11 @@ conventional:
     # Ratio Schedule Settings (omega1 / omega_out)
     ratio_schedule:
       - utilization_min: 0.0
-        ratio: 10.0
-      - utilization_min: 0.2
-        ratio: 15.0
-      - utilization_min: 0.4
         ratio: 20.0
+      - utilization_min: 0.5
+        ratio: 15.0
+      - utilization_min: 1.0
+        ratio: 10.0
     
     # Adaptive Mode Settings
     utilization_threshold: 0.2  # Motor1の利用率がこれを超えたらMotor2を動かす
@@ -229,7 +229,7 @@ conventional:
 
   # Motor 2 の速度制御PIDゲイン (Velocity -> Torque)
   motor2_pid:
-    kp: 0.1
+    kp: 0.02
     ki: 0.0
     kd: 0.0
     max_output: 0.5  # Motor2のトルク制限に合わせる

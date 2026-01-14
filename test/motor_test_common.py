@@ -420,6 +420,49 @@ def _build_trajectory(args):
 
         return sine_fn
 
+    if traj_type == "chirp":
+        amp = float(profile_cfg.get("amplitude", 0.0))
+        offset = float(profile_cfg.get("offset", 0.0))
+        f0 = float(
+            profile_cfg.get(
+                "start_frequency_hz",
+                profile_cfg.get("frequency_start_hz", 0.0),
+            )
+        )
+        f1 = float(
+            profile_cfg.get(
+                "end_frequency_hz",
+                profile_cfg.get("frequency_end_hz", f0),
+            )
+        )
+        duration = max(float(profile_cfg.get("duration", 1.0)), 1e-6)
+
+        def chirp_fn(t: float):
+            if t < start_time:
+                value = offset
+                vel = 0.0
+                acc = 0.0
+            else:
+                tau = t - start_time
+                if repeat:
+                    tau = tau % duration
+                else:
+                    tau = min(tau, duration)
+                k = (f1 - f0) / duration
+                phase = 2.0 * math.pi * (f0 * tau + 0.5 * k * tau**2)
+                freq_inst = f0 + k * tau
+                omega = 2.0 * math.pi * freq_inst
+                value = offset + amp * math.sin(phase)
+                vel = amp * omega * math.cos(phase)
+                acc = -amp * (omega ** 2) * math.sin(phase)
+            if mode == "position":
+                return PositionCommand(position=value, velocity=vel, acceleration=acc)
+            if mode == "velocity":
+                return PositionCommand(position=0.0, velocity=value, acceleration=vel)
+            return float(value)
+
+        return chirp_fn
+
     if traj_type == "ramp":
         start_value = float(profile_cfg.get("start_value", 0.0))
         end_value = float(profile_cfg.get("end_value", args.target))
@@ -464,10 +507,18 @@ def _plot_log(csv_path: Path, fig_path: Path, show: bool) -> None:
         return
 
     data = {}
+    mode = None
+    pid_location = None
     with csv_path.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            if mode is None:
+                mode = (row.get("mode") or "").strip().lower() or None
+            if pid_location is None:
+                pid_location = (row.get("pid_location") or "").strip().lower() or None
             for key, value in row.items():
+                if key in {"motor", "mode", "pid_location"}:
+                    continue
                 data.setdefault(key, [])
                 try:
                     data[key].append(float(value))
@@ -487,18 +538,30 @@ def _plot_log(csv_path: Path, fig_path: Path, show: bool) -> None:
 
     fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
     axes[0].plot(t, position, label="position")
-    if target:
+    plot_mode = mode or "position"
+    pid_loc = pid_location or "pc"
+    command_is_torque = plot_mode == "torque" or pid_loc == "pc"
+    if target and plot_mode == "position":
         axes[0].plot(t, target, "--", label="target")
+    if command and not command_is_torque and plot_mode == "position":
+        axes[0].plot(t, command, ":", label="command")
     axes[0].set_ylabel("turn")
     axes[0].legend(loc="best")
 
     axes[1].plot(t, velocity, label="velocity")
+    if target and plot_mode == "velocity":
+        axes[1].plot(t, target, "--", label="target")
+    if command and not command_is_torque and plot_mode == "velocity":
+        axes[1].plot(t, command, ":", label="command")
     axes[1].set_ylabel("turn/s")
     axes[1].legend(loc="best")
 
-    axes[2].plot(t, command, label="command")
+    if command and command_is_torque:
+        axes[2].plot(t, command, label="command")
     if torque_measured:
         axes[2].plot(t, torque_measured, label="torque_measured")
+    if target and plot_mode == "torque":
+        axes[2].plot(t, target, "--", label="target")
     axes[2].set_ylabel("Nm")
     axes[2].set_xlabel("time [s]")
     axes[2].legend(loc="best")

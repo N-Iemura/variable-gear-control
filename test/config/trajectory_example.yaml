@@ -1,12 +1,22 @@
 active: sine
 profiles:
   sine:
-    type: sine           # step / sine / ramp
+    type: sine           # step / sine / chirp / ramp
     start_time: 0.5      # [s]
     repeat: false
-    amplitude: 0.25      # [turn] or [turn/s] or [Nm]
+    amplitude: 20.0      # [turn] or [turn/s] or [Nm]
     offset: 0.0
     frequency_hz: 0.5
+
+  chirp:
+    type: chirp
+    start_time: 0.5          # [s]
+    duration: 6.0            # [s]
+    repeat: false
+    amplitude: 20.0          # [turn] or [turn/s] or [Nm]
+    offset: 0.0
+    start_frequency_hz: 0.1
+    end_frequency_hz: 2.0
 
   step:
     type: step

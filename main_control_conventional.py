@@ -471,7 +471,9 @@ def build_modules(config_dir: Path) -> Dict[str, object]:
     controller_cfg = _load_yaml(config_dir / "controller.yaml")
     hardware_cfg = _load_yaml(config_dir / "hardware.yaml")
     reference_cfg = _load_yaml(config_dir / "reference.yaml")
-    logger_cfg = _load_yaml(config_dir / "logger.yaml")
+    logger_cfg = dict(_load_yaml(config_dir / "logger.yaml"))
+    logger_cfg["plot_measured_torque"] = True
+    logger_cfg["plot_motor2_velocity"] = True
 
     # Conventional Config (Extract early to allow overrides)
     conventional_cfg = controller_cfg.get("conventional", {})
@@ -745,8 +747,6 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             if ratio > 0.0:
                 ratio_schedule.append({"util_min": util_min, "ratio": ratio})
     ratio_schedule.sort(key=lambda item: item["util_min"])
-    ratio_idx = 0
-    ratio_hysteresis = abs(float(motor2_vel_cfg.get("hysteresis", 0.0)))
     base_ratio = abs(float(mechanism_vec[0])) if abs(mechanism_vec[0]) > 1e-9 else 1.0
     rate_limit = float(motor2_vel_cfg.get("rate_limit", 0.0))
     filter_alpha = motor2_vel_cfg.get("filter_alpha")
@@ -783,6 +783,23 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 return 0.0
             return math.copysign(coulomb, direction)
         return coulomb * math.tanh(vel / blend_width)
+
+    def _interpolate_ratio(util: float) -> float:
+        if not ratio_schedule:
+            return base_ratio
+        if util <= ratio_schedule[0]["util_min"]:
+            return ratio_schedule[0]["ratio"]
+        for lo, hi in zip(ratio_schedule, ratio_schedule[1:]):
+            if util <= hi["util_min"]:
+                u0 = float(lo["util_min"])
+                u1 = float(hi["util_min"])
+                r0 = float(lo["ratio"])
+                r1 = float(hi["ratio"])
+                if u1 <= u0 + 1e-9:
+                    return r1
+                t = (util - u0) / (u1 - u0)
+                return r0 + (r1 - r0) * t
+        return ratio_schedule[-1]["ratio"]
 
     odrive_iface.connect(calibrate=False, axes=["motor1", "motor2", "output"])
     
@@ -944,30 +961,14 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             a1_eff = None
             if motor2_mode == "schedule":
                 limit1 = float(torque_limits.get("motor1", 1.0))
-                current_ratio = (
-                    ratio_schedule[ratio_idx]["ratio"] if ratio_schedule else base_ratio
-                )
-                a1_eff = a1_sign * current_ratio
+                a1_eff = a1_sign * base_ratio
                 if abs(a1_eff) > 1e-9:
                     tau1_req = tau_aug / a1_eff
                     util1 = abs(tau1_req) / (limit1 + 1e-9)
                 else:
                     util1 = 0.0
 
-                if ratio_schedule:
-                    while (
-                        ratio_idx + 1 < len(ratio_schedule)
-                        and util1 >= ratio_schedule[ratio_idx + 1]["util_min"] + ratio_hysteresis
-                    ):
-                        ratio_idx += 1
-                    while (
-                        ratio_idx > 0
-                        and util1 < ratio_schedule[ratio_idx]["util_min"] - ratio_hysteresis
-                    ):
-                        ratio_idx -= 1
-                    selected_ratio = ratio_schedule[ratio_idx]["ratio"]
-                else:
-                    selected_ratio = base_ratio
+                selected_ratio = _interpolate_ratio(util1)
                 a1_eff = a1_sign * selected_ratio
 
                 if motor2_control_mode == "odrive":
@@ -1054,7 +1055,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 )
                 tau2_cmd, _ = motor2_controller.update(m2_command, m2_feedback)
             elif motor2_control_mode == "odrive":
-                tau2_cmd = float(tau_measured_snapshot[1]) if has_measured_tau else 0.0
+                tau2_cmd = 0.0
 
             # 3. Calculate Motor 1 Torque Command
             tau2_measured = tau_measured_snapshot[1]
@@ -1092,9 +1093,9 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             # If we use 'command' mode for DOB, we should probably use the torques we think we applied.
             prev_tau_alloc = np.array([tau1_cmd, tau2_measured])
             
-            # Define tau_alloc for logging compatibility
-            # We log the command sent to Motor 1, and for Motor 2 we log the measured torque.
-            tau_alloc = np.array([tau1_cmd, tau2_measured])
+            # Define tau_alloc for logging compatibility (command torques only).
+            tau2_log = tau2_cmd if motor2_control_mode == "pc_pid" else 0.0
+            tau_alloc = np.array([tau1_cmd, tau2_log])
 
             t_ctrl_end = time.perf_counter()
 
@@ -1111,7 +1112,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 motor1_state.torque_measured,
                 motor2_state.position,
                 motor2_state.velocity,
-                tau_alloc[1],  # tau_2 command (0 in velocity mode)
+                tau_alloc[1],  # tau_2 command (pc_pid only)
                 motor2_state.current_iq,
                 motor2_state.torque_measured,
                 output_state.position,
@@ -1127,6 +1128,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 diag_read=t_read_end - t_read_start,
                 diag_ctrl=t_ctrl_end - t_read_end,
                 diag_log=time.perf_counter() - t_ctrl_end,
+                motor2_vel_cmd=vel_cmd_m2_filtered,
             )
             loop_intervals.append(loop_dt_actual)
             prev_loop_time = now

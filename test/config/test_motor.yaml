@@ -1,18 +1,18 @@
 defaults:
   # 制御モード: position / velocity / torque
-  mode: position
+  mode: velocity
   # PIDの実行場所: pc / odrive
   pid_location: pc
   # 目標値ファイル (YAML). 未指定なら一定値(0)で実行
-  trajectory_file:
+  trajectory_file: test/config/trajectory_example.yaml
   # trajectory_file 内のプロファイル名
   trajectory_profile:
   # 実行時間 [s] (null/未指定で無限ループ)
   duration: 5.0
   # 制御周期 [s]
-  dt: 0.01
+  dt: 0.005
   # PC PIDゲイン
-  kp: 0.0
+  kp: 0.02
   ki: 0.0
   kd: 0.0
   # PC PIDの出力上限 [Nm]
@@ -40,16 +40,20 @@ defaults:
   plot: true
   # プロットウィンドウを表示
   plot_show: true
-  # ODrive側のゲイン (対応ファームのみ)
-  odrive_pos_gain:
-  odrive_vel_gain:
-  odrive_vel_integrator_gain:
-  odrive_vel_integrator_limit:
-
 motor1:
   # モータ1の個別設定
   inertia: 0.00087
+  # ODrive側のゲイン (対応ファームのみ)
+  odrive_pos_gain: 10
+  odrive_vel_gain: 0.07
+  odrive_vel_integrator_gain: 0.33
+  odrive_vel_integrator_limit: 0.33
 
 motor2:
   # モータ2の個別設定
   inertia: 0.00000473
+  # ODrive側のゲイン (対応ファームのみ)
+  odrive_pos_gain: 10
+  odrive_vel_gain: 0.07
+  odrive_vel_integrator_gain: 0.33
+  odrive_vel_integrator_limit: 0.33
