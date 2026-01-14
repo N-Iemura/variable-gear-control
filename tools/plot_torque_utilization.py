@@ -74,7 +74,7 @@ def _plot_combined_figure(
     import matplotlib.pyplot as plt
     from matplotlib import font_manager
 
-    legend_font = font_manager.FontProperties(family="Times New Roman", size=14)
+    legend_font = font_manager.FontProperties(family="Times New Roman", size=22)
     fig, axes = plt.subplots(5, 1, figsize=(10, 12), sharex=True)
     turn_to_deg = lambda arr: np.asarray(arr, dtype=float) * 360.0
     theta_out_deg = turn_to_deg(output_pos)
@@ -82,20 +82,27 @@ def _plot_combined_figure(
     omega_ref_deg = turn_to_deg(omega_ref)
     omega_out_deg = turn_to_deg(output_vel)
 
+    legend_kwargs = dict(
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        borderaxespad=0.0,
+        prop=legend_font,
+    )
+
     if command_type == "velocity":
         axes[0].plot(time, omega_ref_deg, "--", label=r"$\omega_{\mathrm{ref}}$")
         axes[0].plot(time, omega_out_deg, "-", label=r"$\omega_{\mathrm{out}}$")
         axes[0].set_ylabel(r"$\omega$ [deg/s]")
-        axes[0].legend(loc="upper left", prop=legend_font)
+        axes[0].legend(**legend_kwargs)
 
         axes[1].plot(time, theta_out_deg, "-", label=r"$\theta_{\mathrm{out}}$")
         axes[1].set_ylabel(r"$\theta$ [deg]")
-        axes[1].legend(loc="upper left", prop=legend_font)
+        axes[1].legend(**legend_kwargs)
     else:
         axes[0].plot(time, theta_ref_deg, "--", label=r"$\theta_{\mathrm{ref}}$")
         axes[0].plot(time, theta_out_deg, "-", label=r"$\theta_{\mathrm{out}}$")
         axes[0].set_ylabel(r"$\theta$ [deg]")
-        axes[0].legend(loc="upper left", prop=legend_font)
+        axes[0].legend(**legend_kwargs)
 
         axes[1].plot(
             time,
@@ -105,23 +112,23 @@ def _plot_combined_figure(
             label=r"$\omega_{\mathrm{out}}$",
         )
         axes[1].set_ylabel(r"$\omega$ [deg/s]")
-        axes[1].legend(loc="upper left", prop=legend_font)
+        axes[1].legend(**legend_kwargs)
 
     axes[2].plot(time, tau_1, "-", color="tab:blue", label=r"$\tau_1$")
     axes[2].plot(time, tau_2, "-", color="tab:red", label=r"$\tau_2$")
     axes[2].set_ylabel(r"$\tau$ [Nm]")
-    axes[2].legend(loc="upper left", prop=legend_font)
+    axes[2].legend(**legend_kwargs)
 
     axes[3].plot(time, util1, label="motor1", color="tab:blue")
     axes[3].plot(time, util2, label="motor2", color="tab:red")
-    axes[3].set_ylabel("torque utilization")
-    axes[3].legend(loc="upper left", prop=legend_font)
+    axes[3].set_ylabel("torque\nutilization")
+    axes[3].legend(**legend_kwargs)
 
     axes[4].plot(time, margin1, label="motor1", color="tab:blue")
     axes[4].plot(time, margin2, label="motor2", color="tab:red")
     axes[4].set_xlabel("time [s]")
-    axes[4].set_ylabel("torque margin")
-    axes[4].legend(loc="upper left", prop=legend_font)
+    axes[4].set_ylabel("torque\nmargin")
+    axes[4].legend(**legend_kwargs)
 
     for ax in axes:
         ax.grid(False)
@@ -131,6 +138,7 @@ def _plot_combined_figure(
         axes[0].set_xlim(time[0], time[-1])
 
     fig.tight_layout()
+    fig.subplots_adjust(right=0.78)
     return fig
 
 
@@ -165,7 +173,7 @@ def main() -> int:
     plt.rcParams.update(
         {
             "font.family": "Times New Roman",
-            "font.size": 14,
+            "font.size": 22,
             "mathtext.fontset": "custom",
             "mathtext.rm": "Times New Roman",
             "mathtext.it": "Times New Roman:italic",

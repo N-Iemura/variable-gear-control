@@ -22,7 +22,7 @@ torque_allocation:
 
   # true (on): バリア関数による動的重み (1/(1-u)^2) - 制限に近づくと急激に重くなる
   # false (off): 制限値の逆二乗に基づく固定重み (1/limit^2)
-  dynamic_utilization: false
+  dynamic_utilization: true
 
   # 重みのローパス設定 (実効重みを平滑化)
   # weight_filter_tau: 時定数 [s] (0 or 未設定で無効)
@@ -33,7 +33,7 @@ torque_distribution:
   # dynamic: assist_manager等の計算結果に基づいて重みを動的に変更
   # fixed: 下記の fixed_weights を常に使用
   mode: dynamic  # dynamic | fixed
-  fixed_weights: [1.0, 1.0]
+  fixed_weights: [1.0, 6.0]
   fixed_secondary_gain: 1.0
 
 # ==========================================
@@ -216,7 +216,7 @@ conventional:
       - utilization_min: 0.6
         ratio: 15.0
       - utilization_min: 0.8
-        ratio: 10.0
+        ratio: 7.0
     
     # Adaptive Mode Settings
     utilization_threshold: 0.2  # Motor1の利用率がこれを超えたらMotor2を動かす
