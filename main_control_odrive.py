@@ -728,6 +728,15 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     if fixed_weights.shape != (2,) or np.any(fixed_weights <= 0.0):
         raise ValueError("torque_distribution.fixed_weights must be two positive values.")
     friction_cfg = modules.get("friction_ff", {}) or {}
+    m2_coupling_cfg = controller_cfg.get("motor2_coupling", {}) or {}
+    m2_coupling_enabled = bool(m2_coupling_cfg.get("enabled", False))
+    m2_coupling_gain = float(m2_coupling_cfg.get("gain", 0.0))
+    m2_coupling_sign_mode = str(m2_coupling_cfg.get("sign_mode", "same")).lower()
+    m2_coupling_tau_max = m2_coupling_cfg.get("tau_max")
+    if m2_coupling_tau_max is not None:
+        m2_coupling_tau_max = float(m2_coupling_tau_max)
+        if m2_coupling_tau_max <= 0.0:
+            m2_coupling_tau_max = None
     freeze_cfg = controller_cfg.get("freeze", {}) or {}
     hold_motor = str(freeze_cfg.get("motor", "")).lower()
     hold_kp = float(freeze_cfg.get("kp", 0.0))
@@ -936,6 +945,23 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 raise ValueError("torque_distribution.mode must be 'fixed' or 'dynamic'.")
 
             tau_alloc, alloc_diag = allocator.allocate(tau_aug, weights, secondary_gain)
+            if (
+                motor_control_mode == "torque"
+                and m2_coupling_enabled
+                and m2_coupling_gain > 0.0
+            ):
+                tau1_add = m2_coupling_gain * tau_alloc[1]
+                if m2_coupling_sign_mode == "opposite":
+                    tau1_add = -tau1_add
+                if m2_coupling_tau_max is not None:
+                    tau1_add = float(
+                        np.clip(tau1_add, -m2_coupling_tau_max, m2_coupling_tau_max)
+                    )
+                tau_alloc[0] += tau1_add
+                tau_alloc = np.clip(tau_alloc, -torque_limits_vec, torque_limits_vec)
+                tau_alloc = allocator._enforce_rate_limits(tau_alloc)
+                if allocator.sign_enforcement:
+                    tau_alloc = allocator._enforce_sign(tau_alloc, tau_aug)
             if (
                 motor_control_mode == "torque"
                 and hold_motor_idx is not None

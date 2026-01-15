@@ -190,6 +190,13 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
         controller = _build_controller(controller_cfg, command_type, dt, inertia, damping)
 
     torque_limits = controller_cfg.get("torque_limits", {})
+    limits_vec = np.array(
+        [
+            abs(float(torque_limits.get("motor1", 1.0))),
+            abs(float(torque_limits.get("motor2", 1.0))),
+        ],
+        dtype=float,
+    )
     velocity_cfg = controller_cfg.get("velocity_distribution", {})
     kinematic_matrix = np.asarray(
         velocity_cfg.get("kinematic_matrix", plant_cfg.get("kinematic_matrix", mechanism_matrix)),
@@ -260,6 +267,36 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
     )
 
     friction_cfg = controller_cfg.get("friction_ff", {}) or {}
+    internal_push_cfg = controller_cfg.get("internal_push", {}) or {}
+    internal_push_enabled = bool(internal_push_cfg.get("enabled", False))
+    internal_push_mode = str(internal_push_cfg.get("mode", "constant")).lower()
+    internal_push_sign_mode = str(internal_push_cfg.get("sign_mode", "fixed")).lower()
+    internal_push_sign_source = str(internal_push_cfg.get("sign_source", "tau_ref")).lower()
+    internal_push_fixed_sign = float(internal_push_cfg.get("fixed_sign", 1.0))
+    internal_push_beta = float(internal_push_cfg.get("beta", 0.0))
+    internal_push_omega_c = float(internal_push_cfg.get("omega_c", 0.05))
+    internal_push_anchor = str(internal_push_cfg.get("anchor_motor", "max")).lower()
+    internal_push_tau_max = internal_push_cfg.get("tau_max")
+    if internal_push_tau_max is not None:
+        internal_push_tau_max = float(internal_push_tau_max)
+        if internal_push_tau_max <= 0.0:
+            internal_push_tau_max = None
+    null_vec = np.array([mechanism_vec[1], -mechanism_vec[0]], dtype=float)
+    null_scale = float(np.max(np.abs(null_vec))) if np.any(null_vec) else 0.0
+    if internal_push_anchor == "motor1" and abs(null_vec[0]) > 1e-9:
+        null_scale = abs(null_vec[0])
+    elif internal_push_anchor == "motor2" and abs(null_vec[1]) > 1e-9:
+        null_scale = abs(null_vec[1])
+
+    m2_coupling_cfg = controller_cfg.get("motor2_coupling", {}) or {}
+    m2_coupling_enabled = bool(m2_coupling_cfg.get("enabled", False))
+    m2_coupling_gain = float(m2_coupling_cfg.get("gain", 0.0))
+    m2_coupling_sign_mode = str(m2_coupling_cfg.get("sign_mode", "same")).lower()
+    m2_coupling_tau_max = m2_coupling_cfg.get("tau_max")
+    if m2_coupling_tau_max is not None:
+        m2_coupling_tau_max = float(m2_coupling_tau_max)
+        if m2_coupling_tau_max <= 0.0:
+            m2_coupling_tau_max = None
 
     if duration is None:
         duration = _default_duration(reference_cfg)
@@ -374,6 +411,41 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
         else:
             tau_aug = tau_cmd
             dob_diag = {"filtered_disturbance": 0.0}
+
+        tau_push_vec = np.zeros(2, dtype=float)
+        if internal_push_enabled and internal_push_beta > 0.0 and null_scale > 1e-9:
+            if internal_push_sign_source == "tau_aug":
+                push_source = tau_aug
+            else:
+                push_source = tau_cmd
+            if internal_push_sign_mode == "output_ref":
+                if abs(push_source) > 1e-9:
+                    push_sign = math.copysign(1.0, push_source)
+                else:
+                    push_sign = 0.0
+            else:
+                if abs(internal_push_fixed_sign) > 1e-9:
+                    push_sign = math.copysign(1.0, internal_push_fixed_sign)
+                else:
+                    push_sign = 0.0
+            if internal_push_mode == "constant":
+                speed_scale = 1.0
+            elif internal_push_mode == "velocity_exp":
+                if internal_push_omega_c > 1e-9:
+                    speed_scale = math.exp(-abs(output_vel) / internal_push_omega_c)
+                else:
+                    speed_scale = 0.0
+            elif internal_push_mode == "velocity_step":
+                if internal_push_omega_c > 1e-9 and abs(output_vel) < internal_push_omega_c:
+                    speed_scale = 1.0
+                else:
+                    speed_scale = 0.0
+            else:
+                speed_scale = 0.0
+            push_mag = internal_push_beta * abs(push_source) * speed_scale
+            if internal_push_tau_max is not None:
+                push_mag = min(push_mag, internal_push_tau_max)
+            tau_push_vec = (push_sign * push_mag / null_scale) * null_vec
 
         if position_guard_enabled and position_guard_limit > 0.0:
             pos_abs = abs(float(output_pos))
@@ -492,15 +564,17 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
                     tau1_cmd = 0.0
                 else:
                     tau1_cmd = (tau_aug - A2 * tau2_measured) / A1
+            if m2_coupling_enabled and m2_coupling_gain > 0.0:
+                if m2_coupling_sign_mode == "opposite":
+                    tau1_cmd += -m2_coupling_gain * tau2_cmd
+                else:
+                    tau1_cmd += m2_coupling_gain * tau2_cmd
+                if m2_coupling_tau_max is not None:
+                    tau1_cmd = float(
+                        np.clip(tau1_cmd, -m2_coupling_tau_max, m2_coupling_tau_max)
+                    )
             tau_cmds = np.array([tau1_cmd, tau2_cmd], dtype=float)
-            limits_vec = np.array(
-                [
-                    abs(float(torque_limits.get("motor1", 1.0))),
-                    abs(float(torque_limits.get("motor2", 1.0))),
-                ],
-                dtype=float,
-            )
-            tau_alloc = np.clip(tau_cmds, -limits_vec, limits_vec)
+            tau_alloc = np.clip(tau_cmds + tau_push_vec, -limits_vec, limits_vec)
             prev_tau_alloc = tau_alloc.copy()
             tau_out = float(np.dot(mechanism_matrix, tau_alloc))
             output_pos, output_vel = _update_output_state(
@@ -529,6 +603,17 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
                 secondary_gain = fixed_secondary_gain
 
             tau_alloc, _ = allocator.allocate(tau_aug, weights, secondary_gain)
+            if m2_coupling_enabled and m2_coupling_gain > 0.0:
+                tau1_add = m2_coupling_gain * tau_alloc[1]
+                if m2_coupling_sign_mode == "opposite":
+                    tau1_add = -tau1_add
+                if m2_coupling_tau_max is not None:
+                    tau1_add = float(
+                        np.clip(tau1_add, -m2_coupling_tau_max, m2_coupling_tau_max)
+                    )
+                tau_alloc[0] += tau1_add
+            if internal_push_enabled:
+                tau_alloc = np.clip(tau_alloc + tau_push_vec, -limits_vec, limits_vec)
             prev_tau_alloc = tau_alloc.copy()
 
             tau_out = float(np.dot(mechanism_matrix, tau_alloc))

@@ -5,7 +5,7 @@ control_frequency_hz: 200  # 制御ループ周波数 [Hz]
 sample_time_s: 0.005       # サンプリング時間 [s] (1/frequency)
 command_type: position     # 上位からの指令タイプ: position | velocity
 motor_control_mode: torque # モータへの指令モード: torque | velocity
-simulation_mode: conventional # proposed | conventional
+simulation_mode: proposed # proposed | conventional
 position_guard:
   enabled: false          # trueで出力位置が閾値を超えたときトルクを抑制
   limit_turns: 0.1       # [turn] 出力位置の上限
@@ -22,7 +22,7 @@ torque_allocation:
 
   # true (on): バリア関数による動的重み (1/(1-u)^2) - 制限に近づくと急激に重くなる
   # false (off): 制限値の逆二乗に基づく固定重み (1/limit^2)
-  dynamic_utilization: true
+  dynamic_utilization: false
 
   # 重みのローパス設定 (実効重みを平滑化)
   # weight_filter_tau: 時定数 [s] (0 or 未設定で無効)
@@ -35,6 +35,29 @@ torque_distribution:
   mode: dynamic  # dynamic | fixed
   fixed_weights: [1.0, 6.0]
   fixed_secondary_gain: 1.0
+
+# ==========================================
+# Internal push (nullspace) torque
+# ==========================================
+internal_push:
+  enabled: false
+  mode: velocity_exp  # constant | velocity_exp | velocity_step
+  sign_mode: output_ref  # output_ref | fixed
+  sign_source: tau_ref   # tau_ref | tau_aug
+  anchor_motor: motor1      # max | motor1 | motor2
+  fixed_sign: 1.0
+  beta: 0.2             # ratio vs |tau_ref| (or |tau_aug|)
+  omega_c: 0.05          # [turn/s] velocity scale for speed-dependent modes
+  tau_max: 0.1          # [Nm] optional upper bound
+
+# ==========================================
+# Motor2-to-Motor1 coupling (based on tau2)
+# ==========================================
+motor2_coupling:
+  enabled: true
+  gain: 0.3       # tau1 += gain * tau2
+  sign_mode: same # same | opposite
+  tau_max: 0.2   # [Nm] optional clamp for added tau1
 
 # ==========================================
 # プラントモデル (Plant Model)

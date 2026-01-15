@@ -158,6 +158,15 @@ friction_ff:
   vel_deadband: 0.02  # [turn/s] use direction hint while nearly stopped
   blend_width: 0.05   # [turn/s] tanh smoothing width outside deadband
 
+# ==========================================
+# Motor2-to-Motor1 coupling (based on tau2)
+# ==========================================
+motor2_coupling:
+  enabled: true
+  gain: 0.3       # tau1 += gain * tau2
+  sign_mode: same # same | opposite
+  tau_max: 0.2   # [Nm] optional clamp for added tau1
+
 freeze:
   motor: None
   kp: 0.1
