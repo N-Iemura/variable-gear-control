@@ -485,6 +485,10 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
                     tau_aug *= position_guard_min_scale
 
         if sim_mode == "conventional":
+            assist_secondary_gain = 1.0
+            if assist_manager is not None:
+                assist_status = assist_manager.update(tau_aug)
+                assist_secondary_gain = float(assist_status.secondary_gain)
             selected_ratio = None
             a1_eff = None
             if motor2_mode == "schedule":
@@ -546,6 +550,7 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
                 vel_cmd_m2 = target_vel * sign_direction if motor2_active else 0.0
             else:
                 vel_cmd_m2 = 0.0
+            vel_cmd_m2 *= assist_secondary_gain
 
             if rate_limit > 0.0:
                 max_delta = rate_limit * dt

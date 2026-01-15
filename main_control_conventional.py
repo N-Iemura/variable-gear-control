@@ -960,6 +960,10 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
 
             # Conventional Control Logic
             # 1. Determine Motor 2 Velocity Command (Constant / Adaptive / Ratio Schedule)
+            assist_secondary_gain = 1.0
+            if assist_manager is not None:
+                assist_status = assist_manager.update(tau_aug)
+                assist_secondary_gain = float(assist_status.secondary_gain)
             selected_ratio = None
             a1_eff = None
             if motor2_mode == "schedule":
@@ -1043,6 +1047,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                     vel_cmd_m2 = 0.0
             else:
                 vel_cmd_m2 = 0.0
+            vel_cmd_m2 *= assist_secondary_gain
 
             if rate_limit > 0.0:
                 max_delta = rate_limit * dt

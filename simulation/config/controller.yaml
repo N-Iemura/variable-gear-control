@@ -5,7 +5,7 @@ control_frequency_hz: 200  # 制御ループ周波数 [Hz]
 sample_time_s: 0.005       # サンプリング時間 [s] (1/frequency)
 command_type: position     # 上位からの指令タイプ: position | velocity
 motor_control_mode: torque # モータへの指令モード: torque | velocity
-simulation_mode: conventional # proposed | conventional
+simulation_mode: proposed # proposed | conventional
 position_guard:
   enabled: false          # trueで出力位置が閾値を超えたときトルクを抑制
   limit_turns: 0.1       # [turn] 出力位置の上限
@@ -63,7 +63,7 @@ motor2_coupling:
 # プラントモデル (Plant Model)
 # ==========================================
 plant:
-  inertia: 1.509967215896643318  # システム全体の慣性モーメント [kg m^2]
+  inertia: 0.009967215896643318  # システム全体の慣性モーメント [kg m^2]
   damping: 8.172049793342932     # システム全体の粘性摩擦係数 [Nm s/rad]
   # 機構行列: モータトルク [tau1, tau2] から出力トルク tau_out への変換行列
   # tau_out = A @ [tau1, tau2]^T
@@ -106,15 +106,15 @@ per_motor_pid:  # 各モータごとのマイナーループ (オプション)
 # アシスト制御マネージャ (Assist Manager)
 # ==========================================
 assist_manager:
-  enabled: false
+  enabled: true
   # balanced: 常に両方のモータを使用
   # threshold: 負荷に応じて副モータ(Motor2)の使用を切り替え
   mode: threshold
   primary_motor: motor1
 
   # アシスト開始・終了の遷移設定 (負荷率 0.0~1.0 に対して)
-  release_start_ratio: 0.2  # この負荷率を超えるとMotor2が徐々に参加開始
-  release_full_ratio: 0.2   # この負荷率でMotor2が完全に最大参加状態になる
+  release_start_ratio: 0.6  # この負荷率を超えるとMotor2が徐々に参加開始
+  release_full_ratio: 0.6   # この負荷率でMotor2が完全に最大参加状態になる
 
   # 強制切り替え閾値 (ヒステリシス付き)
   torque_thresholds:
@@ -226,8 +226,8 @@ conventional:
     # constant: 一定速度 (valueを使用)
     # adaptive: Motor1の利用率に応じて速度を変更 (threshold, velocity_ratioを使用)
     mode: schedule  # schedule | constant | adaptive
-    schedule_mode: discrete  # discrete | continuous
-    control_mode: odrive  # odrive | pc_pid
+    schedule_mode: continuous  # discrete | continuous
+    control_mode: pc_pid  # odrive | pc_pid
     value: 0.0      # [turn/s] constant mode value
     rate_limit: 20.0 # [turn/s^2] 速度指令の変化率制限 (0で無効)
     filter_tau: 0.0   # [s] 一次遅れフィルタ (0で無効)
@@ -237,7 +237,7 @@ conventional:
     ratio_schedule:
       - utilization_min: 0.0
         ratio: 20.0
-      - utilization_min: 0.6
+      - utilization_min: 0.8
         ratio: 10.0
       - utilization_min: 1.0
         ratio: 7.0
@@ -249,7 +249,7 @@ conventional:
 
   # Motor 2 の速度制御PIDゲイン (Velocity -> Torque)
   motor2_pid:
-    kp: 0.7
+    kp: 0.1
     ki: 0.0
     kd: 0.0
     max_output: 0.5  # Motor2のトルク制限に合わせる
