@@ -311,6 +311,7 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
     motor2_active = False
     motor2_vel_cfg = conventional_cfg.get("motor2_velocity", {}) if sim_mode == "conventional" else {}
     motor2_mode = str(motor2_vel_cfg.get("mode", "constant")).lower()
+    schedule_mode = str(motor2_vel_cfg.get("schedule_mode", "discrete")).lower()
     ratio_schedule_cfg = motor2_vel_cfg.get("ratio_schedule", []) or []
     ratio_schedule: list[dict[str, float]] = []
     if isinstance(ratio_schedule_cfg, list):
@@ -371,6 +372,23 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
     position_guard_soft = abs(float(position_guard_cfg.get("soft_zone", 0.0)))
     position_guard_min_scale = float(position_guard_cfg.get("min_scale", 0.0))
     position_guard_min_scale = max(0.0, min(1.0, position_guard_min_scale))
+
+    def _interpolate_ratio(util: float) -> float:
+        if not ratio_schedule:
+            return base_ratio
+        if util <= ratio_schedule[0]["util_min"]:
+            return ratio_schedule[0]["ratio"]
+        for lo, hi in zip(ratio_schedule, ratio_schedule[1:]):
+            if util <= hi["util_min"]:
+                u0 = float(lo["util_min"])
+                u1 = float(hi["util_min"])
+                r0 = float(lo["ratio"])
+                r1 = float(hi["ratio"])
+                if u1 <= u0 + 1e-9:
+                    return r1
+                t = (util - u0) / (u1 - u0)
+                return r0 + (r1 - r0) * t
+        return ratio_schedule[-1]["ratio"]
 
     for step in range(steps + 1):
         t = step * dt
@@ -481,7 +499,9 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
                 else:
                     util1 = 0.0
 
-                if ratio_schedule:
+                if ratio_schedule and schedule_mode == "continuous":
+                    selected_ratio = _interpolate_ratio(util1)
+                elif ratio_schedule:
                     while (
                         ratio_idx + 1 < len(ratio_schedule)
                         and util1 >= ratio_schedule[ratio_idx + 1]["util_min"] + ratio_hysteresis

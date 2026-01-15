@@ -216,6 +216,7 @@ conventional:
     # constant: 一定速度 (valueを使用)
     # adaptive: Motor1の利用率に応じて速度を変更 (threshold, velocity_ratioを使用)
     mode: schedule  # schedule | constant | adaptive
+    schedule_mode: continuous  # discrete | continuous
     control_mode: pc_pid  # odrive | pc_pid
     value: 0.0      # [turn/s] constant mode value
     rate_limit: 20.0 # [turn/s^2] 速度指令の変化率制限 (0で無効)

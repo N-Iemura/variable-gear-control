@@ -733,6 +733,7 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     vel_cmd_m2_filtered = 0.0
     motor2_vel_cfg = conventional_cfg.get("motor2_velocity", {}) or {}
     motor2_mode = str(motor2_vel_cfg.get("mode", "constant")).lower()
+    schedule_mode = str(motor2_vel_cfg.get("schedule_mode", "continuous")).lower()
     motor2_control_mode = str(motor2_vel_cfg.get("control_mode", "pc_pid")).lower()
     if motor2_control_mode not in {"pc_pid", "odrive"}:
         raise ValueError("motor2_velocity.control_mode must be 'pc_pid' or 'odrive'")
@@ -747,8 +748,10 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             if ratio > 0.0:
                 ratio_schedule.append({"util_min": util_min, "ratio": ratio})
     ratio_schedule.sort(key=lambda item: item["util_min"])
+    ratio_idx = 0
     base_ratio = abs(float(mechanism_vec[0])) if abs(mechanism_vec[0]) > 1e-9 else 1.0
     rate_limit = float(motor2_vel_cfg.get("rate_limit", 0.0))
+    ratio_hysteresis = abs(float(motor2_vel_cfg.get("hysteresis", 0.0)))
     filter_alpha = motor2_vel_cfg.get("filter_alpha")
     filter_tau = motor2_vel_cfg.get("filter_tau")
     a1_sign = math.copysign(1.0, mechanism_vec[0]) if abs(mechanism_vec[0]) > 1e-9 else 1.0
@@ -968,7 +971,20 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 else:
                     util1 = 0.0
 
-                selected_ratio = _interpolate_ratio(util1)
+                if ratio_schedule and schedule_mode == "discrete":
+                    while (
+                        ratio_idx + 1 < len(ratio_schedule)
+                        and util1 >= ratio_schedule[ratio_idx + 1]["util_min"] + ratio_hysteresis
+                    ):
+                        ratio_idx += 1
+                    while (
+                        ratio_idx > 0
+                        and util1 < ratio_schedule[ratio_idx]["util_min"] - ratio_hysteresis
+                    ):
+                        ratio_idx -= 1
+                    selected_ratio = ratio_schedule[ratio_idx]["ratio"]
+                else:
+                    selected_ratio = _interpolate_ratio(util1)
                 a1_eff = a1_sign * selected_ratio
 
                 if motor2_control_mode == "odrive":

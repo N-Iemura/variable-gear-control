@@ -5,7 +5,7 @@ control_frequency_hz: 200  # 制御ループ周波数 [Hz]
 sample_time_s: 0.005       # サンプリング時間 [s] (1/frequency)
 command_type: position     # 上位からの指令タイプ: position | velocity
 motor_control_mode: torque # モータへの指令モード: torque | velocity
-simulation_mode: proposed # proposed | conventional
+simulation_mode: conventional # proposed | conventional
 position_guard:
   enabled: false          # trueで出力位置が閾値を超えたときトルクを抑制
   limit_turns: 0.1       # [turn] 出力位置の上限
@@ -54,9 +54,9 @@ internal_push:
 # Motor2-to-Motor1 coupling (based on tau2)
 # ==========================================
 motor2_coupling:
-  enabled: true
+  enabled: false
   gain: 0.3       # tau1 += gain * tau2
-  sign_mode: same # same | opposite
+  sign_mode: opposite # same | opposite
   tau_max: 0.2   # [Nm] optional clamp for added tau1
 
 # ==========================================
@@ -226,6 +226,7 @@ conventional:
     # constant: 一定速度 (valueを使用)
     # adaptive: Motor1の利用率に応じて速度を変更 (threshold, velocity_ratioを使用)
     mode: schedule  # schedule | constant | adaptive
+    schedule_mode: discrete  # discrete | continuous
     control_mode: odrive  # odrive | pc_pid
     value: 0.0      # [turn/s] constant mode value
     rate_limit: 20.0 # [turn/s^2] 速度指令の変化率制限 (0で無効)
@@ -237,8 +238,8 @@ conventional:
       - utilization_min: 0.0
         ratio: 20.0
       - utilization_min: 0.6
-        ratio: 15.0
-      - utilization_min: 0.8
+        ratio: 10.0
+      - utilization_min: 1.0
         ratio: 7.0
     
     # Adaptive Mode Settings
