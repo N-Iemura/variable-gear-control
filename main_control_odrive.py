@@ -405,6 +405,8 @@ class ReferenceGenerator:
             ratio = min(phase / return_duration, 1.0)
             position = end_value + (start_value - end_value) * ratio
             velocity = (start_value - end_value) / return_duration
+            if phase >= (return_duration - 1e-9):
+                return PositionCommand(start_value)
             return PositionCommand(position, velocity)
         return PositionCommand(start_value if repeat else end_value)
 

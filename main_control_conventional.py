@@ -371,6 +371,8 @@ class ReferenceGenerator:
             ratio = min(phase / return_duration, 1.0)
             position = end_value + (start_value - end_value) * ratio
             velocity = (start_value - end_value) / return_duration
+            if phase >= (return_duration - 1e-9):
+                return PositionCommand(start_value)
             return PositionCommand(position, velocity)
         return PositionCommand(start_value if repeat else end_value)
 
@@ -735,6 +737,9 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     motor2_mode = str(motor2_vel_cfg.get("mode", "constant")).lower()
     schedule_mode = str(motor2_vel_cfg.get("schedule_mode", "continuous")).lower()
     motor2_control_mode = str(motor2_vel_cfg.get("control_mode", "pc_pid")).lower()
+    utilization_source = str(motor2_vel_cfg.get("utilization_source", "torque")).lower()
+    if utilization_source not in {"torque", "velocity"}:
+        utilization_source = "torque"
     if motor2_control_mode not in {"pc_pid", "odrive"}:
         raise ValueError("motor2_velocity.control_mode must be 'pc_pid' or 'odrive'")
     ratio_schedule_cfg = motor2_vel_cfg.get("ratio_schedule", []) or []
@@ -750,6 +755,25 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     ratio_schedule.sort(key=lambda item: item["util_min"])
     ratio_idx = 0
     base_ratio = abs(float(mechanism_vec[0])) if abs(mechanism_vec[0]) > 1e-9 else 1.0
+    ratio_ref_cfg = conventional_cfg.get("ratio_from_reference", {}) or {}
+    ratio_ref_enabled = bool(ratio_ref_cfg.get("enabled", False))
+    ratio_ref_source = str(
+        ratio_ref_cfg.get("omega_out_source", motor2_vel_cfg.get("omega_out_source", "output"))
+    ).lower()
+    ratio_ref_mode = str(ratio_ref_cfg.get("schedule_mode", schedule_mode)).lower()
+    ratio_ref_hysteresis = abs(float(ratio_ref_cfg.get("hysteresis", 0.0)))
+    ratio_ref_schedule_cfg = ratio_ref_cfg.get("speed_schedule", []) or []
+    ratio_ref_schedule: list[dict[str, float]] = []
+    if isinstance(ratio_ref_schedule_cfg, list):
+        for entry in ratio_ref_schedule_cfg:
+            if not isinstance(entry, dict):
+                continue
+            ratio = float(entry.get("ratio", 0.0))
+            speed_min = float(entry.get("speed_min", 0.0))
+            if ratio > 0.0:
+                ratio_ref_schedule.append({"speed_min": speed_min, "ratio": ratio})
+    ratio_ref_schedule.sort(key=lambda item: item["speed_min"])
+    ratio_ref_idx = 0
     rate_limit = float(motor2_vel_cfg.get("rate_limit", 0.0))
     ratio_hysteresis = abs(float(motor2_vel_cfg.get("hysteresis", 0.0)))
     filter_alpha = motor2_vel_cfg.get("filter_alpha")
@@ -757,6 +781,10 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
     a1_sign = math.copysign(1.0, mechanism_vec[0]) if abs(mechanism_vec[0]) > 1e-9 else 1.0
     k1 = float(kinematic_vec[0])
     k2 = float(kinematic_vec[1])
+    velocity_limits_cfg = (controller_cfg.get("velocity_distribution", {}) or {}).get(
+        "velocity_limits", {}
+    )
+    motor1_vel_limit = float(velocity_limits_cfg.get("motor1", 1.0))
     if filter_alpha is not None:
         filter_alpha = float(filter_alpha)
         if filter_alpha <= 0.0:
@@ -804,6 +832,23 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 return r0 + (r1 - r0) * t
         return ratio_schedule[-1]["ratio"]
 
+    def _interpolate_ratio_speed(speed: float) -> float:
+        if not ratio_ref_schedule:
+            return base_ratio
+        if speed <= ratio_ref_schedule[0]["speed_min"]:
+            return ratio_ref_schedule[0]["ratio"]
+        for lo, hi in zip(ratio_ref_schedule, ratio_ref_schedule[1:]):
+            if speed <= hi["speed_min"]:
+                s0 = float(lo["speed_min"])
+                s1 = float(hi["speed_min"])
+                r0 = float(lo["ratio"])
+                r1 = float(hi["ratio"])
+                if s1 <= s0 + 1e-9:
+                    return r1
+                t = (speed - s0) / (s1 - s0)
+                return r0 + (r1 - r0) * t
+        return ratio_ref_schedule[-1]["ratio"]
+
     odrive_iface.connect(calibrate=False, axes=["motor1", "motor2", "output"])
     
     # Set Motor 1 to Torque Control
@@ -829,6 +874,25 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             plant_damping=0.0,
             dt=dt,
             use_feedforward=False
+        )
+
+    motor1_vel_cfg = conventional_cfg.get("motor1_velocity", {}) or {}
+    motor1_vel_enabled = bool(motor1_vel_cfg.get("enabled", False)) or ratio_ref_enabled
+    motor1_pid_cfg = conventional_cfg.get("motor1_velocity_pid", {}) or {}
+    m1_ctrl_gains = {
+        "kp": float(motor1_pid_cfg.get("kp", 0.0)),
+        "ki": float(motor1_pid_cfg.get("ki", 0.0)),
+        "kd": float(motor1_pid_cfg.get("kd", 0.0)),
+        "max_output": float(motor1_pid_cfg.get("max_output", torque_limits.get("motor1", 1.0))),
+    }
+    motor1_controller = None
+    if motor1_vel_enabled:
+        motor1_controller = VelocityController(
+            gains=m1_ctrl_gains,
+            plant_inertia=0.0,
+            plant_damping=0.0,
+            dt=dt,
+            use_feedforward=False,
         )
 
     if "motor2" in odrive_iface.devices:
@@ -966,14 +1030,50 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 assist_secondary_gain = float(assist_status.secondary_gain)
             selected_ratio = None
             a1_eff = None
-            if motor2_mode == "schedule":
-                limit1 = float(torque_limits.get("motor1", 1.0))
-                a1_eff = a1_sign * base_ratio
-                if abs(a1_eff) > 1e-9:
-                    tau1_req = tau_aug / a1_eff
-                    util1 = abs(tau1_req) / (limit1 + 1e-9)
+            omega1_ref = None
+            if ratio_ref_enabled:
+                if ratio_ref_source in {"reference", "reference_derivative"}:
+                    omega_out_ref = float(reference_velocity)
                 else:
-                    util1 = 0.0
+                    omega_out_ref = float(output_state.velocity)
+                speed_ref = abs(omega_out_ref)
+                if ratio_ref_schedule:
+                    if ratio_ref_mode == "continuous":
+                        selected_ratio = _interpolate_ratio_speed(speed_ref)
+                    else:
+                        while (
+                            ratio_ref_idx + 1 < len(ratio_ref_schedule)
+                            and speed_ref
+                            >= ratio_ref_schedule[ratio_ref_idx + 1]["speed_min"] + ratio_ref_hysteresis
+                        ):
+                            ratio_ref_idx += 1
+                        while (
+                            ratio_ref_idx > 0
+                            and speed_ref
+                            < ratio_ref_schedule[ratio_ref_idx]["speed_min"] - ratio_ref_hysteresis
+                        ):
+                            ratio_ref_idx -= 1
+                        selected_ratio = ratio_ref_schedule[ratio_ref_idx]["ratio"]
+                else:
+                    selected_ratio = base_ratio
+                a1_eff = a1_sign * selected_ratio
+                if abs(k2) > 1e-9:
+                    omega1_ref = selected_ratio * a1_sign * omega_out_ref
+                    vel_cmd_m2 = (omega_out_ref - k1 * omega1_ref) / k2
+                else:
+                    vel_cmd_m2 = 0.0
+            elif motor2_mode == "schedule":
+                a1_eff = a1_sign * base_ratio
+                if utilization_source == "velocity":
+                    motor1_velocity = float(states["motor1"].velocity)
+                    util1 = abs(motor1_velocity) / (motor1_vel_limit + 1e-9)
+                else:
+                    limit1 = float(torque_limits.get("motor1", 1.0))
+                    if abs(a1_eff) > 1e-9:
+                        tau1_req = tau_aug / a1_eff
+                        util1 = abs(tau1_req) / (limit1 + 1e-9)
+                    else:
+                        util1 = 0.0
 
                 if ratio_schedule and schedule_mode == "discrete":
                     while (
@@ -1015,13 +1115,16 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
                 # Estimate required torque for Motor 1 if it were to take the full load
                 # tau1_req = tau_aug / A1
                 A1 = mechanism_vec[0]
-                limit1 = torque_limits.get("motor1", 1.0)
-
-                if abs(A1) > 1e-6:
-                    tau1_req = tau_aug / A1
-                    util1 = abs(tau1_req) / (limit1 + 1e-9)
+                if utilization_source == "velocity":
+                    motor1_velocity = float(states["motor1"].velocity)
+                    util1 = abs(motor1_velocity) / (motor1_vel_limit + 1e-9)
                 else:
-                    util1 = 0.0
+                    limit1 = torque_limits.get("motor1", 1.0)
+                    if abs(A1) > 1e-6:
+                        tau1_req = tau_aug / A1
+                        util1 = abs(tau1_req) / (limit1 + 1e-9)
+                    else:
+                        util1 = 0.0
 
                 threshold = float(motor2_vel_cfg.get("utilization_threshold", 0.6))
                 target_vel = float(motor2_vel_cfg.get("target_velocity", 5.0))
@@ -1082,7 +1185,15 @@ def run_control_loop(modules: Dict[str, object], duration: Optional[float] = Non
             tau2_measured = tau_measured_snapshot[1]
             A1 = mechanism_vec[0]
             A2 = mechanism_vec[1]
-            if motor2_mode == "schedule":
+            if motor1_controller is not None and ratio_ref_enabled and omega1_ref is not None:
+                if abs(k1) > 1e-9:
+                    omega1_meas = (float(output_state.velocity) - k2 * float(motor2_state.velocity)) / k1
+                else:
+                    omega1_meas = 0.0
+                m1_feedback = PositionFeedback(position=0.0, velocity=omega1_meas)
+                m1_command = PositionCommand(position=0.0, velocity=omega1_ref, acceleration=0.0)
+                tau1_cmd, _ = motor1_controller.update(m1_command, m1_feedback)
+            elif motor2_mode == "schedule":
                 if a1_eff is None or abs(a1_eff) < 1e-9:
                     tau1_cmd = 0.0
                 else:

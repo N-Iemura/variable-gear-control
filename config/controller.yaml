@@ -216,6 +216,7 @@ conventional:
     # constant: 一定速度 (valueを使用)
     # adaptive: Motor1の利用率に応じて速度を変更 (threshold, velocity_ratioを使用)
     mode: schedule  # schedule | constant | adaptive
+    utilization_source: torque  # torque | velocity
     schedule_mode: continuous  # discrete | continuous
     control_mode: pc_pid  # odrive | pc_pid
     value: 0.0      # [turn/s] constant mode value
@@ -237,12 +238,36 @@ conventional:
     target_velocity: 5.0        # [turn/s] Motor2の目標速度 (減速比変更量に相当)
     hysteresis: 0.1             # 閾値のヒステリシス幅
 
+  # Ratio selection based on reference/output velocity
+  ratio_from_reference:
+    enabled: false
+    omega_out_source: reference  # output | reference | reference_derivative
+    schedule_mode: continuous  # discrete | continuous
+    hysteresis: 0.0
+    speed_schedule:
+      - speed_min: 0.0
+        ratio: 20.0
+      - speed_min: 2.0
+        ratio: 10.0
+      - speed_min: 4.0
+        ratio: 5.0
+
   # Motor 2 の速度制御PIDゲイン (Velocity -> Torque)
   motor2_pid:
     kp: 0.02
     ki: 0.0
     kd: 0.0
     max_output: 0.5  # Motor2のトルク制限に合わせる
+
+  # Motor 1 の速度制御 (減速比制御を使う場合)
+  motor1_velocity:
+    enabled: false
+
+  motor1_velocity_pid:
+    kp: 0.0001
+    ki: 0.0
+    kd: 0.0
+    max_output: 3.0
 
   # Motor 1 (主モータ) の位置制御PIDゲイン (従来手法用)
   motor1_pid:

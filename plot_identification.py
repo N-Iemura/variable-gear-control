@@ -9,13 +9,28 @@ from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 import numpy as np
 
 TURN_TO_RAD = 2.0 * np.pi
 TURN_TO_DEG = 360.0
 RAD_TO_DEG = 180.0 / np.pi
 
-plt.rcParams.update({"font.family": "Times New Roman"})
+plt.rcParams.update(
+    {
+        "font.family": "Times New Roman",
+        "font.size": 22,
+        "mathtext.fontset": "custom",
+        "mathtext.rm": "Times New Roman",
+        "mathtext.it": "Times New Roman:italic",
+        "mathtext.bf": "Times New Roman:bold",
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "legend.frameon": True,
+        "legend.framealpha": 1.0,
+        "legend.edgecolor": "black",
+    }
+)
 
 
 def _read_ident_log(path: Path) -> Tuple[Dict[str, np.ndarray], Dict[str, str]]:
@@ -91,56 +106,90 @@ def _fit_jb(time: np.ndarray, omega_turns: np.ndarray, tau_out: np.ndarray, smoo
 
 def _format_fit_summary(fit: Dict[str, np.ndarray]) -> str:
     return (
-        f"J = {fit['J_hat']:.6f} kg·m^2, "
-        f"B = {fit['B_hat']:.6f} N·m·s/rad, "
-        f"RMSE = {fit['rmse']:.5f} N·m"
+        f"J = {fit['J_hat']:.6f} kg*m^2, "
+        f"B = {fit['B_hat']:.6f} N*m*s/rad, "
+        f"RMSE = {fit['rmse']:.5f} N*m"
     )
 
 
 def plot_identification(
-    csv_path: Path, save_path: Path | None, show: bool, smooth: int
+    csv_path: Path, save_path: Path | None, show: bool, smooth: int, tmax: float | None
 ) -> Tuple[Path, Path]:
     series, metadata = _read_ident_log(csv_path)
     time = _resolve(series, ("time",))
     tau_out = _resolve(series, ("tau_out", "theta_ctrl"))
     omega_turns = _resolve(series, ("output_vel", "theta_dot"))
 
+    if tmax is not None:
+        mask = time <= tmax
+        if not np.any(mask):
+            raise ValueError(f"no samples found at or below tmax={tmax}")
+        time = time[mask]
+        tau_out = tau_out[mask]
+        omega_turns = omega_turns[mask]
+
     fit = _fit_jb(time, omega_turns, tau_out, smooth)
     summary = _format_fit_summary(fit)
 
+    legend_font = font_manager.FontProperties(family="Times New Roman", size=22)
+    legend_kwargs = dict(prop=legend_font)
+
     fig, axes = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
 
-    axes[0].plot(time, tau_out, label=r"$\tau_{\mathrm{out}}$")
-    axes[0].plot(time, fit["tau_model"], "--", label=r"$J\dot{\omega} + B\omega$")
+    axes[0].plot(time, tau_out, color="tab:blue", label=r"$\tau_{\mathrm{out}}$")
+    axes[0].plot(
+        time,
+        fit["tau_model"],
+        "--",
+        color="tab:red",
+        label=r"$J\dot{\omega} + B\omega$",
+    )
     axes[0].set_ylabel(r"$\tau$ [Nm]")
-    axes[0].legend(loc="upper right")
+    axes[0].legend(loc="lower left", bbox_to_anchor=(0.0, 1.02), ncol=2, **legend_kwargs)
 
     omega_deg = omega_turns * TURN_TO_DEG
     omega_dot_deg = fit["omega_dot"] * RAD_TO_DEG
-    axes[1].plot(time, omega_deg, label=r"$\omega_{\mathrm{out}}$ [deg/s]")
+    axes[1].plot(time, omega_deg, color="tab:green", label=r"$\omega_{\mathrm{out}}$ [deg/s]")
     ax_acc = axes[1].twinx()
-    ax_acc.plot(time, omega_dot_deg, color="tab:orange", alpha=0.7, label=r"$\dot{\omega}$ [deg/s$^2$]")
+    ax_acc.plot(
+        time,
+        omega_dot_deg,
+        color="tab:orange",
+        alpha=0.8,
+        label=r"$\dot{\omega}$ [deg/s$^2$]",
+    )
     axes[1].set_ylabel(r"$\omega$ [deg/s]")
     ax_acc.set_ylabel(r"$\dot{\omega}$ [deg/s$^2$]")
-    axes[1].legend(loc="upper left")
-    ax_acc.legend(loc="upper right")
+    axes[1].legend(loc="lower left", bbox_to_anchor=(0.0, 1.02), ncol=2, **legend_kwargs)
+    ax_acc.legend(loc="lower left", bbox_to_anchor=(0.55, 1.02), ncol=2, **legend_kwargs)
 
-    axes[2].plot(time, fit["residual"], label=r"$\tau_{\mathrm{out}} - (J\dot{\omega}+B\omega)$")
+    axes[2].plot(
+        time,
+        fit["residual"],
+        color="tab:purple",
+        label=r"$\tau_{\mathrm{out}} - (J\dot{\omega}+B\omega)$",
+    )
     axes[2].axhline(0.0, color="black", linewidth=0.8, linestyle="--")
     axes[2].set_ylabel(r"Residual [Nm]")
     axes[2].set_xlabel(r"Time [s]")
-    axes[2].legend(loc="upper right")
+    axes[2].legend(loc="lower left", bbox_to_anchor=(0.0, 1.02), ncol=2, **legend_kwargs)
 
     for ax in axes:
         ax.grid(False)
         ax.tick_params(axis="both", direction="in", length=6, width=0.9)
+        if tmax is not None:
+            ax.set_xlim(0.0, tmax)
+
+    axes[0].set_xlim(left=0.0)
+    axes[1].set_xlim(left=0.0)
 
     scatter_fig, scatter_ax = plt.subplots(figsize=(5.5, 4.2))
     scatter_ax.scatter(
         fit["omega_dot"],
         tau_out,
         s=24,
-        alpha=0.5,
+        alpha=0.45,
+        color="tab:blue",
         label="samples",
         edgecolor="none",
     )
@@ -153,7 +202,7 @@ def plot_identification(
     )
     scatter_ax.set_xlabel(r"$\dot{\omega}$ [rad/s$^2$]")
     scatter_ax.set_ylabel(r"$\tau_{\mathrm{out}}$ [Nm]")
-    scatter_ax.legend(loc="best")
+    scatter_ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.02), ncol=2, **legend_kwargs)
     scatter_ax.tick_params(axis="both", direction="in", length=6, width=0.9)
     scatter_fig.tight_layout()
 
@@ -171,7 +220,7 @@ def plot_identification(
 
     scatter_path = main_path.with_name(f"{main_path.stem}_fit{main_path.suffix}")
 
-    fig.tight_layout(rect=[0, 0.03, 1, 0.97])
+    fig.tight_layout(rect=[0, 0.03, 1, 0.92])
     fig.savefig(main_path, dpi=300, bbox_inches="tight")
     scatter_fig.savefig(scatter_path, dpi=300, bbox_inches="tight")
     if show:
@@ -195,10 +244,13 @@ def main() -> None:
         help="保存先PDF（省略時はidentificationフォルダ）",
     )
     parser.add_argument("--smooth", type=int, default=5, help="速度の移動平均窓長（サンプル数）")
+    parser.add_argument("--tmax", type=float, default=None, help="max time to include [s]")
     parser.add_argument("--show", action="store_true", help="プロットウィンドウを表示する場合に指定")
     args = parser.parse_args()
 
-    main_path, scatter_path = plot_identification(args.csv_path, args.save, args.show, args.smooth)
+    main_path, scatter_path = plot_identification(
+        args.csv_path, args.save, args.show, args.smooth, args.tmax
+    )
     print(f"Saved plot to {main_path}")
     print(f"Saved fit plot to {scatter_path}")
 

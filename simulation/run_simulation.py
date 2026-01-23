@@ -306,12 +306,36 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
     output_pos = 0.0
     output_vel = 0.0
     prev_tau_alloc = np.zeros(2, dtype=float)
+    prev_reference_position = None
     motor2_pos = 0.0
     motor2_vel = 0.0
     motor2_active = False
     motor2_vel_cfg = conventional_cfg.get("motor2_velocity", {}) if sim_mode == "conventional" else {}
     motor2_mode = str(motor2_vel_cfg.get("mode", "constant")).lower()
+    motor2_omega_source = str(motor2_vel_cfg.get("omega_out_source", "output")).lower()
     schedule_mode = str(motor2_vel_cfg.get("schedule_mode", "discrete")).lower()
+    utilization_source = str(motor2_vel_cfg.get("utilization_source", "torque")).lower()
+    if utilization_source not in {"torque", "velocity"}:
+        utilization_source = "torque"
+    ratio_ref_cfg = conventional_cfg.get("ratio_from_reference", {}) if sim_mode == "conventional" else {}
+    ratio_ref_enabled = bool(ratio_ref_cfg.get("enabled", False))
+    ratio_ref_source = str(
+        ratio_ref_cfg.get("omega_out_source", motor2_omega_source)
+    ).lower()
+    ratio_ref_mode = str(ratio_ref_cfg.get("schedule_mode", schedule_mode)).lower()
+    ratio_ref_hysteresis = abs(float(ratio_ref_cfg.get("hysteresis", 0.0)))
+    ratio_ref_schedule_cfg = ratio_ref_cfg.get("speed_schedule", []) or []
+    ratio_ref_schedule: list[dict[str, float]] = []
+    if isinstance(ratio_ref_schedule_cfg, list):
+        for entry in ratio_ref_schedule_cfg:
+            if not isinstance(entry, dict):
+                continue
+            ratio = float(entry.get("ratio", 0.0))
+            speed_min = float(entry.get("speed_min", 0.0))
+            if ratio > 0.0:
+                ratio_ref_schedule.append({"speed_min": speed_min, "ratio": ratio})
+    ratio_ref_schedule.sort(key=lambda item: item["speed_min"])
+    ratio_ref_idx = 0
     ratio_schedule_cfg = motor2_vel_cfg.get("ratio_schedule", []) or []
     ratio_schedule: list[dict[str, float]] = []
     if isinstance(ratio_schedule_cfg, list):
@@ -329,6 +353,10 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
     a1_sign = math.copysign(1.0, mechanism_vec[0]) if abs(mechanism_vec[0]) > 1e-9 else 1.0
     k1 = float(kinematic_vec[0])
     k2 = float(kinematic_vec[1])
+    velocity_limits_cfg = (controller_cfg.get("velocity_distribution", {}) or {}).get(
+        "velocity_limits", {}
+    )
+    motor1_vel_limit = float(velocity_limits_cfg.get("motor1", 1.0))
     vel_cmd_m2_filtered = 0.0
     rate_limit = float(motor2_vel_cfg.get("rate_limit", 0.0))
     filter_alpha = motor2_vel_cfg.get("filter_alpha")
@@ -346,6 +374,9 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
         else:
             filter_alpha = None
     motor2_controller = None
+    motor1_controller = None
+    motor1_vel_enabled = False
+    motor1_vel_mode = "schedule"
     motor2_plant_cfg = conventional_cfg.get("motor2_plant", {}) if sim_mode == "conventional" else {}
     motor2_inertia = float(motor2_plant_cfg.get("inertia", inertia))
     motor2_damping = float(motor2_plant_cfg.get("damping", damping))
@@ -366,6 +397,31 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
             derivative_filter_alpha=derivative_alpha,
             use_feedforward=False,
         )
+        motor1_vel_cfg = conventional_cfg.get("motor1_velocity", {}) or {}
+        motor1_vel_enabled = bool(motor1_vel_cfg.get("enabled", False)) or ratio_ref_enabled
+        motor1_vel_mode = str(motor1_vel_cfg.get("mode", "schedule")).lower()
+        motor1_omega_source = str(motor1_vel_cfg.get("omega_out_source", "")).lower()
+        if not motor1_omega_source and bool(motor1_vel_cfg.get("use_reference_derivative", False)):
+            motor1_omega_source = "reference_derivative"
+        if not motor1_omega_source:
+            motor1_omega_source = motor2_omega_source
+        motor1_pid_cfg = conventional_cfg.get("motor1_velocity_pid", {})
+        m1_ctrl_gains = {
+            "kp": float(motor1_pid_cfg.get("kp", 0.1)),
+            "ki": float(motor1_pid_cfg.get("ki", 0.0)),
+            "kd": float(motor1_pid_cfg.get("kd", 0.0)),
+            "max_output": float(motor1_pid_cfg.get("max_output", torque_limits.get("motor1", 1.0))),
+        }
+        if motor1_vel_enabled:
+            motor1_controller = VelocityController(
+                gains=m1_ctrl_gains,
+                plant_inertia=0.0,
+                plant_damping=0.0,
+                dt=dt,
+                derivative_mode=derivative_mode,
+                derivative_filter_alpha=derivative_alpha,
+                use_feedforward=False,
+            )
     position_guard_cfg = controller_cfg.get("position_guard", {}) or {}
     position_guard_enabled = bool(position_guard_cfg.get("enabled", False))
     position_guard_limit = abs(float(position_guard_cfg.get("limit_turns", 0.0)))
@@ -390,6 +446,23 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
                 return r0 + (r1 - r0) * t
         return ratio_schedule[-1]["ratio"]
 
+    def _interpolate_ratio_speed(speed: float) -> float:
+        if not ratio_ref_schedule:
+            return base_ratio
+        if speed <= ratio_ref_schedule[0]["speed_min"]:
+            return ratio_ref_schedule[0]["ratio"]
+        for lo, hi in zip(ratio_ref_schedule, ratio_ref_schedule[1:]):
+            if speed <= hi["speed_min"]:
+                s0 = float(lo["speed_min"])
+                s1 = float(hi["speed_min"])
+                r0 = float(lo["ratio"])
+                r1 = float(hi["ratio"])
+                if s1 <= s0 + 1e-9:
+                    return r1
+                t = (speed - s0) / (s1 - s0)
+                return r0 + (r1 - r0) * t
+        return ratio_ref_schedule[-1]["ratio"]
+
     for step in range(steps + 1):
         t = step * dt
         command: PositionCommand = reference.sample(t)
@@ -402,6 +475,11 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
         else:
             reference_position = command.position
             reference_velocity = command.velocity
+        if prev_reference_position is None:
+            ref_velocity_fd = 0.0
+        else:
+            ref_velocity_fd = (reference_position - prev_reference_position) / dt
+        prev_reference_position = reference_position
 
         error_hint = float(
             ctrl_diag.get(
@@ -491,17 +569,58 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
                 assist_secondary_gain = float(assist_status.secondary_gain)
             selected_ratio = None
             a1_eff = None
-            if motor2_mode == "schedule":
-                limit1 = float(torque_limits.get("motor1", 1.0))
+            omega1_ref = None
+            if ratio_ref_enabled:
+                if ratio_ref_source == "reference":
+                    omega_out_ref = float(reference_velocity)
+                elif ratio_ref_source == "reference_derivative":
+                    omega_out_ref = float(ref_velocity_fd)
+                else:
+                    omega_out_ref = float(output_vel)
+                speed_ref = abs(omega_out_ref)
+                if ratio_ref_schedule:
+                    if ratio_ref_mode == "continuous":
+                        selected_ratio = _interpolate_ratio_speed(speed_ref)
+                    else:
+                        while (
+                            ratio_ref_idx + 1 < len(ratio_ref_schedule)
+                            and speed_ref
+                            >= ratio_ref_schedule[ratio_ref_idx + 1]["speed_min"] + ratio_ref_hysteresis
+                        ):
+                            ratio_ref_idx += 1
+                        while (
+                            ratio_ref_idx > 0
+                            and speed_ref
+                            < ratio_ref_schedule[ratio_ref_idx]["speed_min"] - ratio_ref_hysteresis
+                        ):
+                            ratio_ref_idx -= 1
+                        selected_ratio = ratio_ref_schedule[ratio_ref_idx]["ratio"]
+                else:
+                    selected_ratio = base_ratio
+                a1_eff = a1_sign * selected_ratio
+                if abs(k2) > 1e-9:
+                    omega1_ref = selected_ratio * a1_sign * omega_out_ref
+                    vel_cmd_m2 = (omega_out_ref - k1 * omega1_ref) / k2
+                else:
+                    vel_cmd_m2 = 0.0
+            elif motor2_mode == "schedule":
                 current_ratio = (
                     ratio_schedule[ratio_idx]["ratio"] if ratio_schedule else base_ratio
                 )
                 a1_eff = a1_sign * current_ratio
-                if abs(a1_eff) > 1e-9:
-                    tau1_req = tau_aug / a1_eff
-                    util1 = abs(tau1_req) / (limit1 + 1e-9)
+                if utilization_source == "velocity":
+                    if abs(k1) > 1e-9:
+                        motor1_velocity = (output_vel - k2 * motor2_vel) / k1
+                    else:
+                        motor1_velocity = 0.0
+                    util1 = abs(motor1_velocity) / (motor1_vel_limit + 1e-9)
                 else:
-                    util1 = 0.0
+                    limit1 = float(torque_limits.get("motor1", 1.0))
+                    if abs(a1_eff) > 1e-9:
+                        tau1_req = tau_aug / a1_eff
+                        util1 = abs(tau1_req) / (limit1 + 1e-9)
+                    else:
+                        util1 = 0.0
 
                 if ratio_schedule and schedule_mode == "continuous":
                     selected_ratio = _interpolate_ratio(util1)
@@ -521,7 +640,12 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
                     selected_ratio = base_ratio
                 a1_eff = a1_sign * selected_ratio
 
-                omega_out_ref = float(output_vel)
+                if motor2_omega_source == "reference":
+                    omega_out_ref = float(reference_velocity)
+                elif motor2_omega_source == "reference_derivative":
+                    omega_out_ref = float(ref_velocity_fd)
+                else:
+                    omega_out_ref = float(output_vel)
                 if abs(k2) > 1e-9:
                     omega1_ref = selected_ratio * a1_sign * omega_out_ref
                     vel_cmd_m2 = (omega_out_ref - k1 * omega1_ref) / k2
@@ -531,12 +655,19 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
                 vel_cmd_m2 = float(motor2_vel_cfg.get("value", 0.0))
             elif motor2_mode == "adaptive":
                 A1 = float(mechanism_vec[0])
-                limit1 = float(torque_limits.get("motor1", 1.0))
-                if abs(A1) > 1e-6:
-                    tau1_req = tau_aug / A1
-                    util1 = abs(tau1_req) / (limit1 + 1e-9)
+                if utilization_source == "velocity":
+                    if abs(k1) > 1e-9:
+                        motor1_velocity = (output_vel - k2 * motor2_vel) / k1
+                    else:
+                        motor1_velocity = 0.0
+                    util1 = abs(motor1_velocity) / (motor1_vel_limit + 1e-9)
                 else:
-                    util1 = 0.0
+                    limit1 = float(torque_limits.get("motor1", 1.0))
+                    if abs(A1) > 1e-6:
+                        tau1_req = tau_aug / A1
+                        util1 = abs(tau1_req) / (limit1 + 1e-9)
+                    else:
+                        util1 = 0.0
                 threshold = float(motor2_vel_cfg.get("utilization_threshold", 0.6))
                 target_vel = float(motor2_vel_cfg.get("target_velocity", 5.0))
                 hysteresis = float(motor2_vel_cfg.get("hysteresis", 0.1))
@@ -579,7 +710,31 @@ def run_simulation(config_dir: Path, duration: float | None = None) -> Path:
             A1 = float(mechanism_vec[0])
             A2 = float(mechanism_vec[1])
             tau2_measured = tau2_cmd
-            if motor2_mode == "schedule":
+            if motor1_controller is not None and ratio_ref_enabled and omega1_ref is not None:
+                if abs(k1) > 1e-9:
+                    omega1_meas = (float(output_vel) - k2 * float(motor2_vel)) / k1
+                else:
+                    omega1_meas = 0.0
+                m1_feedback = PositionFeedback(position=0.0, velocity=omega1_meas)
+                m1_command = PositionCommand(position=0.0, velocity=omega1_ref, acceleration=0.0)
+                tau1_cmd, _ = motor1_controller.update(m1_command, m1_feedback)
+            elif motor1_controller is not None and motor2_mode == "schedule" and omega1_ref is not None:
+                if motor1_omega_source == "reference":
+                    omega_out_ref_m1 = float(reference_velocity)
+                elif motor1_omega_source == "reference_derivative":
+                    omega_out_ref_m1 = float(ref_velocity_fd)
+                else:
+                    omega_out_ref_m1 = float(output_vel)
+                if abs(k2) > 1e-9:
+                    omega1_ref = selected_ratio * a1_sign * omega_out_ref_m1
+                if abs(k1) > 1e-9:
+                    omega1_meas = (float(output_vel) - k2 * float(motor2_vel)) / k1
+                else:
+                    omega1_meas = 0.0
+                m1_feedback = PositionFeedback(position=0.0, velocity=omega1_meas)
+                m1_command = PositionCommand(position=0.0, velocity=omega1_ref, acceleration=0.0)
+                tau1_cmd, _ = motor1_controller.update(m1_command, m1_feedback)
+            elif motor2_mode == "schedule":
                 if a1_eff is None or abs(a1_eff) < 1e-9:
                     tau1_cmd = 0.0
                 else:

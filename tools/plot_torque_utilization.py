@@ -121,21 +121,27 @@ def _plot_combined_figure(
 
     axes[3].plot(time, util1, label="motor1", color="tab:blue")
     axes[3].plot(time, util2, label="motor2", color="tab:red")
-    axes[3].set_ylabel("torque\nutilization")
+    axes[3].set_ylabel("\u03bc")
+    axes[3].set_ylim(bottom=0.0)
     axes[3].legend(**legend_kwargs)
 
     axes[4].plot(time, margin1, label="motor1", color="tab:blue")
     axes[4].plot(time, margin2, label="motor2", color="tab:red")
     axes[4].set_xlabel("time [s]")
-    axes[4].set_ylabel("torque\nmargin")
+    axes[4].set_ylabel("m [Nm]")
+    axes[4].set_ylim(bottom=0.0)
     axes[4].legend(**legend_kwargs)
 
     for ax in axes:
         ax.grid(False)
         ax.tick_params(axis="both", direction="in", length=6, width=0.8)
+    # Reduce overlap between the lower-left x/y tick labels (e.g., 0 and 0.0).
+    axes[4].tick_params(axis="x", pad=8)
+    axes[4].tick_params(axis="y", pad=8)
 
     if len(time):
-        axes[0].set_xlim(time[0], time[-1])
+        for ax in axes:
+            ax.set_xlim(0.0, time[-1])
 
     fig.tight_layout()
     fig.subplots_adjust(right=0.78)

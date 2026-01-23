@@ -1,11 +1,11 @@
 command_type: position  # position | velocity
-active_profile: chirp  # step | sine | chirp | ramp | ramp_b | ramp_step | nstep
+active_profile: step  # step | sine | chirp | ramp | ramp_b | ramp_step | nstep
 file_label: null
 
 step:
   initial_wait: 1.0
-  step_duration: 5.0
-  output_amplitude: 0.8
+  step_duration: 1.0
+  output_amplitude: 0.4
   offset: 0.0
   repeat: false
 
@@ -17,8 +17,8 @@ sine:
 
 chirp:
   initial_wait: 1.0
-  output_amplitude: 0.2      # [turn] 振幅を少し大きく
-  start_frequency_hz: 0.5
+  output_amplitude: 0.25      # [turn] 振幅を少し大きく
+  start_frequency_hz: 1.0
   end_frequency_hz: 2.5      # 高周波まで回す
   duration: 10.0
   post_duration: 0.0          # [s] chirp終了後にログを伸ばす時間
@@ -38,10 +38,10 @@ pulse:
 ramp:
   initial_wait: 1.0
   start_value: 0.0
-  end_value: 0.5
-  ramp_duration: 5.0
-  hold_duration: 2.0
-  return_duration: 5.0
+  end_value: 0.65
+  ramp_duration: 0.1
+  hold_duration: 1.0
+  return_duration: 0.1
   repeat: false
 
 ramp_b:

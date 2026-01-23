@@ -22,7 +22,7 @@ torque_allocation:
 
   # true (on): バリア関数による動的重み (1/(1-u)^2) - 制限に近づくと急激に重くなる
   # false (off): 制限値の逆二乗に基づく固定重み (1/limit^2)
-  dynamic_utilization: false
+  dynamic_utilization: true
 
   # 重みのローパス設定 (実効重みを平滑化)
   # weight_filter_tau: 時定数 [s] (0 or 未設定で無効)
@@ -63,8 +63,8 @@ motor2_coupling:
 # プラントモデル (Plant Model)
 # ==========================================
 plant:
-  inertia: 0.009967215896643318  # システム全体の慣性モーメント [kg m^2]
-  damping: 8.172049793342932     # システム全体の粘性摩擦係数 [Nm s/rad]
+  inertia: 1.409967215896643318  # システム全体の慣性モーメント [kg m^2]
+  damping: 14.172049793342932     # システム全体の粘性摩擦係数 [Nm s/rad]
   # 機構行列: モータトルク [tau1, tau2] から出力トルク tau_out への変換行列
   # tau_out = A @ [tau1, tau2]^T
   mechanism_matrix: [-20.0, 12.26993865]
@@ -74,7 +74,7 @@ plant:
 # PID制御ゲイン
 # ==========================================
 outer_pid:  # 位置制御ループ (Position -> Velocity)
-  kp: 80.00
+  kp: 130.00
   ki: 0.0
   kd: 8.0
   use_feedforward: true
@@ -106,7 +106,7 @@ per_motor_pid:  # 各モータごとのマイナーループ (オプション)
 # アシスト制御マネージャ (Assist Manager)
 # ==========================================
 assist_manager:
-  enabled: true
+  enabled: false
   # balanced: 常に両方のモータを使用
   # threshold: 負荷に応じて副モータ(Motor2)の使用を切り替え
   mode: threshold
@@ -226,7 +226,9 @@ conventional:
     # constant: 一定速度 (valueを使用)
     # adaptive: Motor1の利用率に応じて速度を変更 (threshold, velocity_ratioを使用)
     mode: schedule  # schedule | constant | adaptive
-    schedule_mode: continuous  # discrete | continuous
+    utilization_source: torque  # torque | velocity
+    schedule_mode: discrete  # discrete | continuous
+    omega_out_source: output  # output | reference | reference_derivative
     control_mode: pc_pid  # odrive | pc_pid
     value: 0.0      # [turn/s] constant mode value
     rate_limit: 20.0 # [turn/s^2] 速度指令の変化率制限 (0で無効)
@@ -234,24 +236,56 @@ conventional:
     filter_alpha: 0.0 # [0-1] tauより優先、0で無効
 
     # Ratio Schedule Settings (omega1 / omega_out)
+    # Used when mode=schedule and ratio_from_reference.enabled=false.
+    # utilization = |tau1_req| / torque_limit1, where tau1_req = tau_aug / A1.
+    # ratio is the target omega1/omega_out used to compute motor2 velocity.
     ratio_schedule:
       - utilization_min: 0.0
         ratio: 20.0
       - utilization_min: 0.8
+        ratio: 15.0
+      - utilization_min: 2.0
         ratio: 10.0
-      - utilization_min: 1.0
-        ratio: 7.0
     
     # Adaptive Mode Settings
     utilization_threshold: 0.2  # Motor1の利用率がこれを超えたらMotor2を動かす
     target_velocity: 5.0        # [turn/s] Motor2の目標速度 (減速比変更量に相当)
-    hysteresis: 0.0            # 閾値のヒステリシス幅
+    hysteresis: 0.1            # 閾値のヒステリシス幅
+
+  # Ratio selection based on reference/output velocity
+  # When enabled, this takes priority over ratio_schedule.
+  # speed_min is based on |omega_out_source|, ratio is omega1/omega_out.
+  ratio_from_reference:
+    enabled: false
+    omega_out_source: reference  # output | reference | reference_derivative
+    schedule_mode: continuous  # discrete | continuous
+    hysteresis: 0.1
+    speed_schedule:
+      - speed_min: 0.0
+        ratio: 20.0
+      - speed_min: 2.0
+        ratio: 10.0
+      - speed_min: 4.0
+        ratio: 5.0
+
+  # Motor 1 の速度制御 (従来法で有効化する場合のみ)
+  motor1_velocity:
+    enabled: false
+    mode: schedule  # schedule
+    omega_out_source: reference_derivative  # output | reference | reference_derivative
+    use_reference_derivative: true  # compat: overrides omega_out_source when true
+
+  motor1_velocity_pid:
+    kp: 0.0001
+    ki: 0.0
+    kd: 0.0
+    max_output: 3.0
 
   # Motor 2 の速度制御PIDゲイン (Velocity -> Torque)
   motor2_pid:
-    kp: 0.1
+    kp: 1.0
     ki: 0.0
-    kd: 0.0
+    kd: 0.1
     max_output: 0.5  # Motor2のトルク制限に合わせる
 
   # Motor 1 (主モータ) の位置制御PIDゲイン (従来手法用)
