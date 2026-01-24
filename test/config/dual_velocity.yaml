@@ -15,7 +15,7 @@ defaults:
 
 motor1:
   # Target velocity [turn/s]
-  velocity: 1.0
+  velocity: 0.0
   # Optional motor1 PID (torque mode)
   kp: 0.02
   ki: 0.0
@@ -27,13 +27,13 @@ motor1:
   # derivative_filter: 1.0
   # no_feedforward: false
   # Optional motor1 ODrive velocity gains (velocity mode)
-  odrive_vel_gain: 0.10
+  odrive_vel_gain: 1.67
   odrive_vel_integrator_gain: 0.33
   odrive_vel_integrator_limit: 0.33
 
 motor2:
   # Target velocity [turn/s]
-  velocity: -0.5
+  velocity: -20.0
   # Optional motor2 PID (torque mode)
   kp: 0.02
   ki: 0.0
@@ -46,5 +46,5 @@ motor2:
   # no_feedforward: false
   # Optional motor2 ODrive velocity gains (velocity mode)
   odrive_vel_gain: 0.07
-  odrive_vel_integrator_gain: 0.33
+  odrive_vel_integrator_gain: 0.0
   odrive_vel_integrator_limit: 0.33

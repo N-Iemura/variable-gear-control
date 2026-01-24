@@ -132,8 +132,8 @@ torque_preference:
   secondary_gain: 0.0
 
 torque_limits:  # 各モータの最大トルク [Nm]
-  motor1: 2.0
-  motor2: 0.5
+  motor1: 1.0
+  motor2: 0.2
 
 torque_rate_limits:  # トルク変化率制限 [Nm/s]
   motor1: 100.0

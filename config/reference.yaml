@@ -1,5 +1,5 @@
 command_type: position  # position | velocity
-active_profile: step
+active_profile: chirp
 file_label: null
 
 step:
