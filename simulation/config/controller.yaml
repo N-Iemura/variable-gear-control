@@ -22,7 +22,7 @@ torque_allocation:
 
   # true (on): バリア関数による動的重み (1/(1-u)^2) - 制限に近づくと急激に重くなる
   # false (off): 制限値の逆二乗に基づく固定重み (1/limit^2)
-  dynamic_utilization: true
+  dynamic_utilization: false
 
   # 重みのローパス設定 (実効重みを平滑化)
   # weight_filter_tau: 時定数 [s] (0 or 未設定で無効)
@@ -242,7 +242,7 @@ conventional:
     ratio_schedule:
       - utilization_min: 0.0
         ratio: 20.0
-      - utilization_min: 0.8
+      - utilization_min: 0.90
         ratio: 15.0
       - utilization_min: 2.0
         ratio: 10.0
@@ -290,7 +290,7 @@ conventional:
 
   # Motor 1 (主モータ) の位置制御PIDゲイン (従来手法用)
   motor1_pid:
-    kp: 80.0
+    kp: 130.0
     ki: 0.0
     kd: 8.0
     use_feedforward: true

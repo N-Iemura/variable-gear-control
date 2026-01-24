@@ -4,7 +4,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from plot_torque_utilization import _plot_combined_figure, _read_metadata
+from plot_torque_utilization import _plot_combined_figure, _read_metadata, _resolve_columns
 
 
 def _iter_rows(path: Path):
@@ -38,6 +38,18 @@ def main() -> int:
         help="Save the plot image to this path (PDF/PNG recommended).",
     )
     parser.add_argument(
+        "--limit-motor1",
+        type=float,
+        default=None,
+        help="Override motor1 torque limit [Nm] for utilization/margin.",
+    )
+    parser.add_argument(
+        "--limit-motor2",
+        type=float,
+        default=None,
+        help="Override motor2 torque limit [Nm] for utilization/margin.",
+    )
+    parser.add_argument(
         "--no-show",
         action="store_true",
         help="Do not show the plot window.",
@@ -61,6 +73,10 @@ def main() -> int:
     )
 
     limit1, limit2, command_type = _read_metadata(args.csv)
+    if args.limit_motor1 is not None:
+        limit1 = float(args.limit_motor1)
+    if args.limit_motor2 is not None:
+        limit2 = float(args.limit_motor2)
 
     t0 = float(args.start)
     t1 = t0 + float(args.duration)
@@ -82,12 +98,18 @@ def main() -> int:
         if t0 <= t <= t1:
             t -= t0
             time.append(t)
-            output_pos.append(float(row["output_pos"]))
-            output_vel.append(float(row["output_vel"]))
-            theta_ref.append(float(row["theta_ref"]))
-            omega_ref.append(float(row.get("omega_ref", 0.0)))
-            tau1 = float(row["tau_1"])
-            tau2 = float(row["tau_2"])
+            if not output_pos:
+                columns = _resolve_columns(list(row.keys()))
+                if not columns:
+                    print("Unsupported CSV format: torque columns not found.")
+                    return 1
+            output_pos.append(float(row[columns["output_pos"]]))
+            output_vel.append(float(row[columns["output_vel"]]))
+            theta_ref.append(float(row[columns["theta_ref"]]))
+            omega_ref_key = columns.get("omega_ref")
+            omega_ref.append(float(row.get(omega_ref_key, 0.0)) if omega_ref_key else 0.0)
+            tau1 = float(row[columns["tau_1"]])
+            tau2 = float(row[columns["tau_2"]])
             tau_1.append(tau1)
             tau_2.append(tau2)
             util1.append(abs(tau1) / (limit1 or 1.0))

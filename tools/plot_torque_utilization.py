@@ -35,17 +35,64 @@ def _iter_rows(path: Path):
             yield row
 
 
+def _resolve_columns(fieldnames: list[str]) -> dict:
+    """Resolve column names across log variants."""
+    # Newer logs
+    if "tau_1" in fieldnames and "tau_2" in fieldnames:
+        return {
+            "tau_1": "tau_1",
+            "tau_2": "tau_2",
+            "output_pos": "output_pos",
+            "output_vel": "output_vel",
+            "theta_ref": "theta_ref",
+            "omega_ref": "omega_ref",
+        }
+    # Legacy logs (motor0/motor1)
+    if "motor0_torque" in fieldnames and "motor1_torque" in fieldnames:
+        return {
+            "tau_1": "motor0_torque",
+            "tau_2": "motor1_torque",
+            "output_pos": "output_pos",
+            "output_vel": "output_vel",
+            "theta_ref": "theta_ref",
+            "omega_ref": "omega_ref",
+        }
+    return {}
+
+
 def compute(path: Path):
     limit1, limit2, command_type = _read_metadata(path)
+    limit1 = float(getattr(compute, "_limit1_override", limit1))
+    limit2 = float(getattr(compute, "_limit2_override", limit2))
+    window_start = getattr(compute, "_window_start", None)
+    window_end = getattr(compute, "_window_end", None)
     time = []
     util1 = []
     util2 = []
     margin1 = []
     margin2 = []
-    for row in _iter_rows(path):
+    torque_offset = float(getattr(compute, "_motor1_offset", 0.0))
+    rows_iter = _iter_rows(path)
+    first_row = next(rows_iter, None)
+    if first_row is None:
+        return time, util1, util2, margin1, margin2, (limit1, limit2), command_type
+    columns = _resolve_columns(list(first_row.keys()))
+    if not columns:
+        raise KeyError("Unsupported CSV format: torque columns not found.")
+    # include first row
+    row = first_row
+    while row is not None:
         t = float(row["time"])
-        tau1 = float(row["tau_1"])
-        tau2 = float(row["tau_2"])
+        if window_start is not None and t < window_start:
+            row = next(rows_iter, None)
+            continue
+        if window_end is not None and t > window_end:
+            row = next(rows_iter, None)
+            continue
+        if window_start is not None:
+            t -= window_start
+        tau1 = float(row[columns["tau_1"]]) + torque_offset
+        tau2 = float(row[columns["tau_2"]])
         u1 = abs(tau1) / (limit1 or 1.0)
         u2 = abs(tau2) / (limit2 or 1.0)
         time.append(t)
@@ -53,6 +100,7 @@ def compute(path: Path):
         util2.append(u2)
         margin1.append((limit1 or 1.0) - abs(tau1))
         margin2.append((limit2 or 1.0) - abs(tau2))
+        row = next(rows_iter, None)
     return time, util1, util2, margin1, margin2, (limit1, limit2), command_type
 
 
@@ -160,9 +208,55 @@ def main() -> int:
         default=None,
         help="Save the plot image to this path (PDF/PNG recommended).",
     )
+    parser.add_argument(
+        "--margin-offset-motor1",
+        type=float,
+        default=0.0,
+        help="Add an offset [Nm] to motor1 torque margin (default: 0.0).",
+    )
+    parser.add_argument(
+        "--torque-offset-motor1",
+        type=float,
+        default=0.0,
+        help="Add an offset [Nm] to motor1 torque values before plotting/utilization.",
+    )
+    parser.add_argument(
+        "--limit-motor1",
+        type=float,
+        default=None,
+        help="Override motor1 torque limit [Nm] for utilization/margin.",
+    )
+    parser.add_argument(
+        "--limit-motor2",
+        type=float,
+        default=None,
+        help="Override motor2 torque limit [Nm] for utilization/margin.",
+    )
+    parser.add_argument(
+        "--start",
+        type=float,
+        default=None,
+        help="Window start time [s] to crop (optional).",
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Window duration [s] to crop (optional).",
+    )
     args = parser.parse_args()
 
+    compute._motor1_offset = args.torque_offset_motor1
+    if args.limit_motor1 is not None:
+        compute._limit1_override = args.limit_motor1
+    if args.limit_motor2 is not None:
+        compute._limit2_override = args.limit_motor2
+    if args.start is not None and args.duration is not None:
+        compute._window_start = float(args.start)
+        compute._window_end = float(args.start) + float(args.duration)
     time, util1, util2, margin1, margin2, limits, command_type = compute(args.csv)
+    if args.margin_offset_motor1:
+        margin1 = [m + args.margin_offset_motor1 for m in margin1]
 
     print(f"limits: motor1={limits[0]}, motor2={limits[1]}")
     print(f"util1: max={max(util1):.3f}, mean={sum(util1)/len(util1):.3f}")
@@ -193,12 +287,27 @@ def main() -> int:
     )
 
     rows = list(_iter_rows(args.csv))
-    output_pos = [float(r["output_pos"]) for r in rows]
-    output_vel = [float(r["output_vel"]) for r in rows]
-    theta_ref = [float(r["theta_ref"]) for r in rows]
-    omega_ref = [float(r["omega_ref"]) for r in rows]
-    tau_1 = [float(r["tau_1"]) for r in rows]
-    tau_2 = [float(r["tau_2"]) for r in rows]
+    if not rows:
+        print("No data rows.")
+        return 1
+    columns = _resolve_columns(list(rows[0].keys()))
+    if not columns:
+        print("Unsupported CSV format: torque columns not found.")
+        return 1
+    if args.start is not None and args.duration is not None:
+        t0 = float(args.start)
+        t1 = t0 + float(args.duration)
+        rows = [r for r in rows if t0 <= float(r["time"]) <= t1]
+        # shift time to start at zero for plotting
+        for r in rows:
+            r["time"] = str(float(r["time"]) - t0)
+    output_pos = [float(r[columns["output_pos"]]) for r in rows]
+    output_vel = [float(r[columns["output_vel"]]) for r in rows]
+    theta_ref = [float(r[columns["theta_ref"]]) for r in rows]
+    omega_ref_key = columns.get("omega_ref")
+    omega_ref = [float(r.get(omega_ref_key, 0.0)) for r in rows] if omega_ref_key else [0.0] * len(rows)
+    tau_1 = [float(r[columns["tau_1"]]) + float(args.torque_offset_motor1) for r in rows]
+    tau_2 = [float(r[columns["tau_2"]]) for r in rows]
 
     fig = _plot_combined_figure(
         time,
