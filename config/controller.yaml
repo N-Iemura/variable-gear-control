@@ -29,7 +29,7 @@ torque_allocation:
 
   # true (on): バリア関数による動的重み (1/(1-u)^2) - 制限に近づくと急激に重くなる
   # false (off): 制限値の逆二乗に基づく固定重み (1/limit^2)
-  dynamic_utilization: false
+  dynamic_utilization: true
 
   # 重みのローパス設定 (実効重みを平滑化)
   # weight_filter_tau: 時定数 [s] (0 or 未設定で無効)
@@ -132,8 +132,8 @@ torque_preference:
   secondary_gain: 0.0
 
 torque_limits:  # 各モータの最大トルク [Nm]
-  motor1: 1.0
-  motor2: 0.2
+  motor1: 3.0
+  motor2: 0.5
 
 torque_rate_limits:  # トルク変化率制限 [Nm/s]
   motor1: 100.0
@@ -217,7 +217,7 @@ conventional:
     # adaptive: Motor1の利用率に応じて速度を変更 (threshold, velocity_ratioを使用)
     mode: schedule  # schedule | constant | adaptive
     utilization_source: torque  # torque | velocity
-    schedule_mode: continuous  # discrete | continuous
+    schedule_mode: discrete  # discrete | continuous
     control_mode: pc_pid  # odrive | pc_pid
     value: 0.0      # [turn/s] constant mode value
     rate_limit: 20.0 # [turn/s^2] 速度指令の変化率制限 (0で無効)
@@ -228,8 +228,8 @@ conventional:
     ratio_schedule:
       - utilization_min: 0.0
         ratio: 20.0
-      - utilization_min: 0.5
-        ratio: 15.0
+      - utilization_min: 0.9
+        ratio: 10.0
       - utilization_min: 1.0
         ratio: 10.0
     
@@ -272,7 +272,7 @@ conventional:
   # Motor 1 (主モータ) の位置制御PIDゲイン (従来手法用)
   motor1_pid:
     kp: 40.00
-    ki: 20.0
-    kd: 10.0
+    ki: 5.0
+    kd: 3.0
     use_feedforward: true
     max_output: 150.0

@@ -2,9 +2,10 @@ import argparse
 import csv
 import re
 from pathlib import Path
+from typing import List, Tuple
 
 
-def _read_metadata(path: Path) -> tuple[float, float, str]:
+def _read_metadata(path: Path) -> Tuple[float, float, str]:
     limit1 = None
     limit2 = None
     command_type = "position"
@@ -35,7 +36,29 @@ def _iter_rows(path: Path):
             yield row
 
 
-def _resolve_columns(fieldnames: list[str]) -> dict:
+def _estimate_dt(time_series: List[float]) -> float:
+    if len(time_series) < 2:
+        return 0.0
+    diffs = [t2 - t1 for t1, t2 in zip(time_series[:-1], time_series[1:]) if t2 > t1]
+    if not diffs:
+        return 0.0
+    diffs.sort()
+    return diffs[len(diffs) // 2]
+
+
+def _low_pass(values: List[float], dt: float, tau: float) -> List[float]:
+    if not values or dt <= 0.0 or tau <= 0.0:
+        return values
+    alpha = dt / (tau + dt)
+    y = float(values[0])
+    out = [y]
+    for x in values[1:]:
+        y += alpha * (float(x) - y)
+        out.append(y)
+    return out
+
+
+def _resolve_columns(fieldnames: List[str]) -> dict:
     """Resolve column names across log variants."""
     # Newer logs
     if "tau_1" in fieldnames and "tau_2" in fieldnames:
@@ -244,6 +267,12 @@ def main() -> int:
         default=None,
         help="Window duration [s] to crop (optional).",
     )
+    parser.add_argument(
+        "--pos-lpf-tau",
+        type=float,
+        default=None,
+        help="Low-pass filter time constant [s] for output position/velocity (optional).",
+    )
     args = parser.parse_args()
 
     compute._motor1_offset = args.torque_offset_motor1
@@ -301,6 +330,7 @@ def main() -> int:
         # shift time to start at zero for plotting
         for r in rows:
             r["time"] = str(float(r["time"]) - t0)
+    time_plot = [float(r["time"]) for r in rows]
     output_pos = [float(r[columns["output_pos"]]) for r in rows]
     output_vel = [float(r[columns["output_vel"]]) for r in rows]
     theta_ref = [float(r[columns["theta_ref"]]) for r in rows]
@@ -308,6 +338,10 @@ def main() -> int:
     omega_ref = [float(r.get(omega_ref_key, 0.0)) for r in rows] if omega_ref_key else [0.0] * len(rows)
     tau_1 = [float(r[columns["tau_1"]]) + float(args.torque_offset_motor1) for r in rows]
     tau_2 = [float(r[columns["tau_2"]]) for r in rows]
+    if args.pos_lpf_tau:
+        dt = _estimate_dt(time_plot)
+        output_pos = _low_pass(output_pos, dt, float(args.pos_lpf_tau))
+        output_vel = _low_pass(output_vel, dt, float(args.pos_lpf_tau))
 
     fig = _plot_combined_figure(
         time,
