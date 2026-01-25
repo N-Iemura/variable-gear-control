@@ -22,7 +22,7 @@ torque_allocation:
 
   # true (on): バリア関数による動的重み (1/(1-u)^2) - 制限に近づくと急激に重くなる
   # false (off): 制限値の逆二乗に基づく固定重み (1/limit^2)
-  dynamic_utilization: false
+  dynamic_utilization: true
 
   # 重みのローパス設定 (実効重みを平滑化)
   # weight_filter_tau: 時定数 [s] (0 or 未設定で無効)
@@ -63,8 +63,8 @@ motor2_coupling:
 # プラントモデル (Plant Model)
 # ==========================================
 plant:
-  inertia: 1.409967215896643318  # システム全体の慣性モーメント [kg m^2]
-  damping: 14.172049793342932     # システム全体の粘性摩擦係数 [Nm s/rad]
+  inertia: 0.50996721589664318  # システム全体の慣性モーメント [kg m^2]
+  damping: 8.172049793342932     # システム全体の粘性摩擦係数 [Nm s/rad]
   # 機構行列: モータトルク [tau1, tau2] から出力トルク tau_out への変換行列
   # tau_out = A @ [tau1, tau2]^T
   mechanism_matrix: [-20.0, 12.26993865]
@@ -74,9 +74,9 @@ plant:
 # PID制御ゲイン
 # ==========================================
 outer_pid:  # 位置制御ループ (Position -> Velocity)
-  kp: 130.00
-  ki: 0.0
-  kd: 8.0
+  kp: 60.00
+  ki: 10.0
+  kd: 3.0
   use_feedforward: true
   max_output: 200.0
 
@@ -148,8 +148,8 @@ torque_preference:
   secondary_gain: 0.0
 
 torque_limits:  # 各モータの最大トルク [Nm]
-  motor1: 3.0
-  motor2: 0.5
+  motor1: 1.2
+  motor2: 0.2
 
 torque_rate_limits:  # トルク変化率制限 [Nm/s]
   motor1: 100.0
