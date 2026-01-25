@@ -63,7 +63,7 @@ motor2_coupling:
 # プラントモデル (Plant Model)
 # ==========================================
 plant:
-  inertia: 0.50996721589664318  # システム全体の慣性モーメント [kg m^2]
+  inertia: 0.30996721589664318  # システム全体の慣性モーメント [kg m^2]
   damping: 8.172049793342932     # システム全体の粘性摩擦係数 [Nm s/rad]
   # 機構行列: モータトルク [tau1, tau2] から出力トルク tau_out への変換行列
   # tau_out = A @ [tau1, tau2]^T
@@ -74,11 +74,11 @@ plant:
 # PID制御ゲイン
 # ==========================================
 outer_pid:  # 位置制御ループ (Position -> Velocity)
-  kp: 60.00
+  kp: 112.00
   ki: 10.0
   kd: 3.0
   use_feedforward: true
-  max_output: 200.0
+  max_output: 150.0
 
 velocity_pid:  # 速度制御ループ (Velocity -> Torque/Force)
   kp: 0.5
